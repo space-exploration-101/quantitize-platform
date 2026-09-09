@@ -26,10 +26,8 @@ DEMO_MODE = os.environ.get("WEB_DEMO_MODE", "0").strip().lower() in ("1", "true"
 WEB_DIR = Path(__file__).resolve().parent
 
 PREPROCESS_MODES = [
-    ("rgb", "RGB（彩色预训练）"),
-    ("grayscale_uniform", "黑白三通道同值"),
-    ("grayscale_r_channel", "黑白 R 通道（G=B=0）"),
-    ("passthrough", "不做通道预处理（保持原图通道）"),
+    ("passthrough", "不做处理（已是灰度/R 通道，输出 1 通道）"),
+    ("color_to_gray", "彩图转灰度（BGR2GRAY，输出 1 通道）"),
 ]
 
 app = FastAPI(title="Quantitize Web UI")
@@ -229,7 +227,7 @@ async def index(request: Request):
             "cali_datasets": cali,
             "test_datasets": test,
             "preprocess_modes": PREPROCESS_MODES,
-            "preprocess_mode": "grayscale_uniform",
+            "preprocess_mode": "passthrough",
             "errors": errors,
             "display_name": "",
         },
@@ -340,7 +338,7 @@ async def create_zip(
     request: Request,
     display_name: str = Form(""),
     onnx_name: str = Form(""),
-    preprocess_mode: str = Form("grayscale_uniform"),
+    preprocess_mode: str = Form("passthrough"),
     zip_file: UploadFile = File(...),
 ):
     if DEMO_MODE:
@@ -390,7 +388,7 @@ async def create_shared(
     request: Request,
     display_name: str = Form(""),
     onnx_name: str = Form(""),
-    preprocess_mode: str = Form("grayscale_uniform"),
+    preprocess_mode: str = Form("passthrough"),
     cali_dataset_id: str = Form(...),
     test_dataset_id: str = Form(...),
     model_pt: UploadFile = File(...),

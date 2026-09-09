@@ -159,19 +159,10 @@ def run_python_nms(prediction, conf_thres=0.25, iou_thres=0.7, max_det=300, nc=2
     Returns:
         detections: 检测结果 (N, 6) 格式: [x1, y1, x2, y2, conf, cls]
     """
-    # 尝试从 ultralytics 导入 NMS
     try:
-        # 尝试从项目中的 ultralytics 导入
-        train_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../train'))
-        if train_path not in sys.path:
-            sys.path.insert(0, train_path)
-        from ultralytics.utils.nms import non_max_suppression
+        from ultralytics.utils.ops import non_max_suppression
     except ImportError:
-        try:
-            # 尝试从已安装的 ultralytics 导入
-            from ultralytics.utils.nms import non_max_suppression
-        except ImportError:
-            raise ImportError("无法导入 non_max_suppression，请确保 ultralytics 已安装或路径正确")
+        from ultralytics.utils.nms import non_max_suppression
     
     # 转换为 torch tensor
     prediction_torch = torch.from_numpy(prediction).cpu()

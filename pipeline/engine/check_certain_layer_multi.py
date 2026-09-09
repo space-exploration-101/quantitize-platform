@@ -27,29 +27,22 @@ import _setup_local_onnxruntime  # noqa: E402
 
 import onnxruntime as ort
 import cv2
+from grayscale_preprocess import PREPROCESS_MODE_ALIASES, PREPROCESS_MODES, normalize_preprocess_mode, preprocess_by_mode
 
-def load_and_preprocess_real_image(image_path, target_size=(1280, 1280)):
-    """加载和预处理真实图像"""
+def load_and_preprocess_real_image(image_path, target_size=(1280, 1280), preprocess_mode="passthrough"):
+    """加载和预处理真实图像；必须与 job_config.preprocess_mode 保持一致。输出 NCHW1。"""
     print(f"加载图像: {image_path}")
+    preprocess_mode = normalize_preprocess_mode(preprocess_mode)
+    print(f"探针图预处理模式: {preprocess_mode}")
 
-    # 使用OpenCV加载
-    image_cv = cv2.imread(image_path)
-    if image_cv is None:
-        raise ValueError(f"无法加载图像: {image_path}")
-
-    # 转为灰度图（黑白）
-    image_gray = cv2.cvtColor(image_cv, cv2.COLOR_BGR2GRAY)
-
-    # 调整图像尺寸
-    image_resized = cv2.resize(image_gray, target_size)
-
-    # 归一化到[0,1]
-    image_normalized = image_resized.astype(np.float16) / 255.0
-    # 灰度图 (H, W) 复制为三通道，每通道值相同 -> (3, H, W) CHW 格式
-    image_chw = np.stack([image_normalized, image_normalized, image_normalized], axis=0)
-
-    # 添加 batch 维度 (C, H, W) -> (1, C, H, W)
-    image_batch = np.expand_dims(image_chw, axis=0)
+    image_batch = preprocess_by_mode(
+        image_path,
+        preprocess_mode,
+        target_size=target_size,
+        dtype=np.float16,
+    )
+    if image_batch.shape[1] != 1:
+        raise ValueError(f"preprocess produced {image_batch.shape}, expected 1-channel NCHW")
 
     print(f"图像形状: {image_batch.shape}")
     print(f"图像数据类型: {image_batch.dtype}")
@@ -518,10 +511,11 @@ def resolve_generate_bin_image(model_path):
     )
 
 
-def run_inference(quantized_model_path):
+def run_inference(quantized_model_path, preprocess_mode="passthrough"):
     image_path = resolve_generate_bin_image(quantized_model_path)
     print("准备输入数据...")
-    image = load_and_preprocess_real_image(image_path)
+    print(f"探针图片: {image_path}")
+    image = load_and_preprocess_real_image(image_path, preprocess_mode=preprocess_mode)
     input_data = {'images': image}
     
     quantized_session = ort.InferenceSession(quantized_model_path)
@@ -951,13 +945,25 @@ NUM_LAYERS = 32  # 导出层 0～31
 if __name__ == "__main__":
     from concurrent.futures import ThreadPoolExecutor, as_completed
     from get_conv_name import load_onnx_operators
-    # model_path = "/home/crab2/yolov8/Quantization-YOLOv8-main/myquant2/temp_model2/"
-    # model_path = "/home/crab2/yolov8/Quantization-YOLOv8-main/myquant2/temp_model2/wrs_fp16_final2_output.onnx"
-    model_path = sys.argv[1]
-    folder_path = sys.argv[2]
+    import argparse
+
+    parser = argparse.ArgumentParser(description="从量化 ONNX 导出 FPGA 逐层 bin")
+    parser.add_argument("model_path")
+    parser.add_argument("folder_path")
+    parser.add_argument(
+        "--preprocess-mode",
+        default=os.environ.get("GENERATE_BIN_PREPROCESS_MODE", "passthrough"),
+        choices=tuple(PREPROCESS_MODE_ALIASES),
+        help="探针图片预处理模式；应与 job_config.preprocess_mode 一致。输出始终 1 通道。",
+    )
+    args = parser.parse_args()
+
+    model_path = args.model_path
+    folder_path = args.folder_path
+    preprocess_mode = normalize_preprocess_mode(args.preprocess_mode)
     if folder_path[-1] != '/':
         folder_path = folder_path + '/'
-    results, names, intput_data = run_inference(model_path)
+    results, names, intput_data = run_inference(model_path, preprocess_mode=preprocess_mode)
     operators = load_onnx_operators(model_path)
 
     # 主线程只加载一次模型，传入各 worker 复用，避免多线程并发读同一文件导致 initializer 数据不完整

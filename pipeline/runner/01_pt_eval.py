@@ -51,6 +51,14 @@ def run_pt_eval(cfg: JobConfig) -> int:
         max_det=cfg.max_det,
     )
     model = YOLO(str(cfg.model_pt))
+    first_conv = next((m for m in model.model.modules() if hasattr(m, "in_channels") and hasattr(m, "weight")), None)
+    if first_conv is None or int(first_conv.in_channels) != cfg.input_channels:
+        print(
+            f"错误: 模型输入通道与任务 ABI 不一致: model={getattr(first_conv, 'in_channels', None)}, "
+            f"job={cfg.input_channels}（量化平台现只接受 1 通道 gray1）",
+            file=sys.stderr,
+        )
+        return 1
     images = list_test_images(cfg.test_images_dir)
     if not images:
         print("错误: 无测试图", file=sys.stderr)

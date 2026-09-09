@@ -33,10 +33,8 @@ from eval_common import (  # noqa: E402
 )
 from job_config import JobConfig  # noqa: E402
 from preprocess import (  # noqa: E402
-    grayscale_to_chw_tensor,
     imread_unicode,
     preprocess_bgr_by_mode,
-    to_grayscale_hw,
 )
 
 DEFAULT_BATCH_SIZE = 8
@@ -48,15 +46,11 @@ def preprocess_chw(
     side_view_mode: bool,
     preprocess_mode: str,
 ) -> tuple[np.ndarray, tuple[int, int], tuple[int, int]]:
-    """返回 (3,H,W) float16 与原始/预处理尺寸。"""
+    """返回 (1,H,W) float16 与原始/预处理尺寸。"""
     img = imread_unicode(img_path)
     orig_h, orig_w = img.shape[:2]
-    if side_view_mode:
-        gray = to_grayscale_hw(img)
-        gray = cv2.resize(gray, (imgsz, imgsz), interpolation=cv2.INTER_LINEAR)
-        chw = grayscale_to_chw_tensor(gray, (imgsz, imgsz), dtype=np.float16)[0]
-    else:
-        chw = preprocess_bgr_by_mode(img, preprocess_mode, (imgsz, imgsz), dtype=np.float16)[0]
+    # direct 与 FPGA 输入 roundtrip 都必须遵守 job_config.preprocess_mode，输出始终 1 通道。
+    chw = preprocess_bgr_by_mode(img, preprocess_mode, (imgsz, imgsz), dtype=np.float16)[0]
     return chw, (orig_h, orig_w), (imgsz, imgsz)
 
 
@@ -117,8 +111,8 @@ def run_onnx_eval(
     side_view = input_mode == "fpga_side_view"
     if side_view:
         images_root = cfg.fpga_test_pack_dir / "side_view"
-        title = "ONNX FPGA Side-View Evaluation"
-        out_dir = cfg.fpga_eval_dir()
+        title = "ONNX FPGA Input Roundtrip Evaluation"
+        out_dir = cfg.fpga_input_roundtrip_eval_dir()
     else:
         images_root = cfg.test_images_dir
         title = "ONNX Direct Evaluation"
@@ -134,7 +128,7 @@ def run_onnx_eval(
     session, input_name, output_name, max_ort_batch = create_onnx_eval_session(model_path)
 
     # CUDA 预热，避免首张图统计失真
-    warmup = np.zeros((1, 3, ev.imgsz, ev.imgsz), dtype=np.float16)
+    warmup = np.zeros((1, cfg.input_channels, ev.imgsz, ev.imgsz), dtype=np.float16)
     session.run([output_name], {input_name: warmup})
 
     per_image: list[dict] = []
