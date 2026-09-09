@@ -109,7 +109,7 @@ manifest.json            # 八步状态
 冒烟：
 
 ```bash
-cd /data3/ywang/quantitize-platform
+cd /home/rs/wrs/onnxviewe/quantitize-platform
 /home/rs/miniconda3/envs/yolov8/bin/python pipeline/verify_patches.py
 ```
 
@@ -157,7 +157,7 @@ validate?
 （勿直接改旧 `quantitize/output_data/...`）：
 
 ```bash
-cd /data3/ywang/quantitize-platform
+cd /home/rs/wrs/onnxviewe/quantitize-platform
 export PY=/home/rs/miniconda3/envs/yolov8/bin/python
 export JOB=data/output_data/20260727_151741_aituosh_moon_0727_2
 # 该 job：onnx_name=aituosh_moon_0727_2，preprocess_mode=grayscale_r_channel
@@ -205,9 +205,12 @@ $PY pipeline/engine/quantitize.py \
 3. 标准 job 布局：`workspace` 同级的 `input/cali`
 4. 遗留回退：`pipeline/engine/cali_data`（若存在）
 
-`--preprocess-mode` 会作用于校准 DataReader（`rgb` / `grayscale_uniform` / `grayscale_r_channel` / `passthrough`）。
+`--preprocess-mode` 只影响校准图怎么变成灰度，**量化模型输入始终是 1 通道** `[1,1,1280,1280]` FP16：
 
-`passthrough` 表示不做额外灰度/通道预处理，保持图片文件已有的通道内容；仍会做模型输入必需的 resize、BGR->RGB、/255、NCHW。对已经是 `R=gray, G=B=0` 的图片，应优先使用该模式，避免再次 `BGR2GRAY` 导致亮度被压低。
+- `passthrough`：已是灰度或 R-only 时取强度（3 通道取 R），不跑 BGR2GRAY
+- `color_to_gray`：彩图用 OpenCV BGR2GRAY
+
+旧别名 `rgb` / `grayscale_uniform` / `grayscale_r_channel` / `gray1` 会映射到 `color_to_gray`。resize 和 /255 两种模式都会做。
 **预期（`workspace/`）：**
 
 | 文件 | 含义 |
@@ -300,7 +303,7 @@ $PY pipeline/runner/06_bundle.py --job-dir "$JOB"
 ## 6. 冒烟与登记表（不跑完整量化）
 
 ```bash
-cd /data3/ywang/quantitize-platform
+cd /home/rs/wrs/onnxviewe/quantitize-platform
 $PY=/home/rs/miniconda3/envs/yolov8/bin/python
 
 $PY pipeline/verify_patches.py      # 补丁是否从 patches/ 加载

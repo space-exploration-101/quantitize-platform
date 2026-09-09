@@ -584,12 +584,21 @@ def run_python_nms(
     return batch[0] if batch else np.array([])
 
 
-def ensure_nms_imported() -> None:
-    """在创建 ORT CUDA Session 之前导入 NMS（避免 cuDNN 路径干扰 torch）。"""
+def import_ultralytics_nms():
+    """Ultralytics 8.3.x keeps NMS in utils.ops; 8.4+ moved it to utils.nms."""
     from std_platform import pin_stdlib_platform
 
     pin_stdlib_platform()
-    from ultralytics.utils.nms import non_max_suppression  # noqa: F401, WPS433
+    try:
+        from ultralytics.utils.ops import non_max_suppression
+    except ImportError:
+        from ultralytics.utils.nms import non_max_suppression
+    return non_max_suppression
+
+
+def ensure_nms_imported() -> None:
+    """在创建 ORT CUDA Session 之前导入 NMS（避免 cuDNN 路径干扰 torch）。"""
+    import_ultralytics_nms()
 
 
 def run_python_nms_batch(
@@ -601,7 +610,7 @@ def run_python_nms_batch(
 ) -> List[np.ndarray]:
     """对 batch 模型输出逐图 NMS，返回长度为 B 的检测列表。"""
     ensure_nms_imported()
-    from ultralytics.utils.nms import non_max_suppression
+    non_max_suppression = import_ultralytics_nms()
     import torch
 
     if prediction.ndim == 2:

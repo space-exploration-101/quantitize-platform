@@ -5,8 +5,7 @@ PNG与BIN转换工具
 功能：
 1. PNG转BIN: 读取PNG图片，按 preprocess_mode 取输入灰度源，resize到2000x2000，
    将8bit线性映射到12bit(0..4095)后按行打包
-2. BIN转PNG: 读取BIN文件，将12bit(0..4095)线性映射到8bit(0..255)后存PNG；
-   passthrough 模式下保存为 R-only PNG，保持与 R-only 模型输入语义一致
+2. BIN转PNG: 读取BIN文件，将12bit(0..4095)线性映射到8bit(0..255)后存单通道 PNG（gray1）
 3. 精度损失验证: 比较原始图片和转换后的图片
 """
 
@@ -19,8 +18,13 @@ import numpy as np
 import cv2
 from typing import Tuple, Optional
 
-
-PREPROCESS_MODES = ("rgb", "grayscale_uniform", "grayscale_r_channel", "passthrough")
+from grayscale_preprocess import (  # noqa: E402
+    PREPROCESS_MODE_ALIASES,
+    PREPROCESS_MODES,
+    normalize_preprocess_mode,
+    plane_color_to_gray,
+    plane_passthrough,
+)
 
 
 def _imread_unicode(path: str, flags=int(cv2.IMREAD_COLOR)):
@@ -70,44 +74,20 @@ def _u8_to_u12(gray_u8: np.ndarray) -> np.ndarray:
 
 
 def _normalize_preprocess_mode(preprocess_mode: str) -> str:
-    mode = (preprocess_mode or "grayscale_uniform").strip()
-    if mode not in PREPROCESS_MODES:
-        raise ValueError(f"未知 preprocess_mode: {preprocess_mode!r}，可选 {PREPROCESS_MODES}")
-    return mode
+    return normalize_preprocess_mode(preprocess_mode)
 
 
 def _gray_source_from_image(img: np.ndarray, preprocess_mode: str) -> np.ndarray:
-    """根据任务预处理模式选择写入 FPGA 输入 bin 的 8bit 单通道源。
-
-    - passthrough：输入图片已经按模型训练方式准备好。对当前 21 类 R-only 数据，
-      文件语义是 R=gray, G=B=0；OpenCV 读入后为 BGR，因此取 img[:, :, 2]。
-      不能再执行 BGR2GRAY，否则亮度会被 0.299 权重压暗。
-    - 其他模式：保持历史行为，按 OpenCV BGR2GRAY 生成单通道灰度。
-
-    注意：FPGA bin 当前仍是单通道 12bit 灰度数据，不承载三通道彩色信息。
-    """
+    """FPGA bin 始终写单通道 12bit 灰度。"""
     mode = _normalize_preprocess_mode(preprocess_mode)
-    if img.ndim == 2:
-        return img
-    if img.shape[2] == 1:
-        return img[:, :, 0]
     if mode == "passthrough":
-        return img[:, :, 2]
-    return cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        return plane_passthrough(img)
+    return plane_color_to_gray(img)
 
 
 def _side_view_image_from_gray(gray_u8: np.ndarray, preprocess_mode: str) -> np.ndarray:
-    """根据任务预处理模式保存 side_view PNG。
-
-    passthrough 用于 R-only 模型时，side_view 必须仍是 R=gray,G=B=0；
-    否则后续 ONNX passthrough 评估会把三通道同值灰度当作真实输入，造成
-    direct 与 roundtrip 不一致。
-    """
-    mode = _normalize_preprocess_mode(preprocess_mode)
-    if mode == "passthrough":
-        bgr = np.zeros((gray_u8.shape[0], gray_u8.shape[1], 3), dtype=np.uint8)
-        bgr[:, :, 2] = gray_u8
-        return bgr
+    """gray1 侧视保存为单通道 PNG，不再复制成 RGB/R-only。"""
+    _normalize_preprocess_mode(preprocess_mode)
     return gray_u8
 
 
@@ -159,7 +139,7 @@ def png_to_bin(
     png_path: str,
     bin_path: str,
     target_size: int = 2000,
-    preprocess_mode: str = "grayscale_uniform",
+    preprocess_mode: str = "passthrough",
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     将PNG图片转换为BIN文件
@@ -247,7 +227,7 @@ def bin_to_png(
     png_path: str,
     width: int = 2000,
     height: int = 2000,
-    preprocess_mode: str = "grayscale_uniform",
+    preprocess_mode: str = "passthrough",
 ) -> np.ndarray:
     """
     将BIN文件转换为PNG图片
@@ -430,9 +410,9 @@ def main():
                        help='BIN转PNG时的图片高度（默认2000）')
     parser.add_argument(
         '--preprocess-mode',
-        choices=PREPROCESS_MODES,
-        default='grayscale_uniform',
-        help='任务预处理模式；passthrough 下取/恢复 R-only，其他模式保持历史灰度化',
+        choices=tuple(PREPROCESS_MODE_ALIASES),
+        default='passthrough',
+        help='passthrough=不做处理；color_to_gray=彩图转灰度。两者都输出 1 通道。',
     )
     
     args = parser.parse_args()

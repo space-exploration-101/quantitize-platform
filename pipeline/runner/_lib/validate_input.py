@@ -74,8 +74,12 @@ def parse_label_line(line: str) -> Optional[Tuple[int, float, float, float, floa
 
 
 def check_grayscale_style(img_bgr: np.ndarray) -> Tuple[bool, str]:
-    """检查是否接近项目约定的 R=灰度、G=B=0 或纯灰度三通道。"""
-    if img_bgr is None or img_bgr.ndim != 3:
+    """检查是否已是 1 通道灰度，或历史 R-only / 三通道同值黑白。"""
+    if img_bgr is None:
+        return False, "unreadable"
+    if img_bgr.ndim == 2 or (img_bgr.ndim == 3 and img_bgr.shape[2] == 1):
+        return True, "gray1"
+    if img_bgr.ndim != 3 or img_bgr.shape[2] < 3:
         return False, "unreadable"
     r, g, b = img_bgr[:, :, 0], img_bgr[:, :, 1], img_bgr[:, :, 2]
     if g.max() == 0 and b.max() == 0:
@@ -89,7 +93,7 @@ def validate_job_input(
     job_root: Path,
     *,
     min_cali: int = 400,
-    min_test: int = 100,
+    min_test: int = 1,
     nc: int = 6,
     expect_imgsz: int = 1280,
     class_names: Optional[Dict[int, str]] = None,
@@ -286,7 +290,8 @@ def validate_job_input(
             _issue(
                 "warning",
                 "not_grayscale",
-                f"抽样 {sample_n} 张中有 {gray_warn} 张非标准黑白格式（建议 R=灰度且 G=B=0）；将强制转灰度",
+                f"抽样 {sample_n} 张中有 {gray_warn} 张看起来是彩图。任务会按所选预处理变成 1 通道："
+                "passthrough 取 R；color_to_gray 跑 BGR2GRAY。",
                 test_img_dir,
             )
         )

@@ -13,14 +13,17 @@ from pathlib import Path
 from typing import Optional
 
 _PIPELINE = Path(__file__).resolve().parents[2]
-if str(_PIPELINE) not in sys.path:
-    sys.path.insert(0, str(_PIPELINE))
+_ENGINE = _PIPELINE / "engine"
+for _p in (_PIPELINE, _ENGINE):
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
 from script_registry import (  # noqa: E402
     OUTPUT_DATA_ROOT,
     PLATFORM_ROOT,
     QUANTITIZE_DIR,
     TASK_SCRATCH_ROOT,
 )
+from grayscale_preprocess import normalize_preprocess_mode  # noqa: E402
 
 
 def ascii_task_slug(display_name: str, max_len: int = 40) -> str:
@@ -40,11 +43,13 @@ class JobConfig:
     conf: float = 0.25
     iou: float = 0.7
     max_det: int = 300
-    min_test_images: int = 100
+    min_test_images: int = 1
     min_cali_images: int = 400
     cali_dataset_id: str = ""
     test_dataset_id: str = ""
-    preprocess_mode: str = "grayscale_uniform"
+    preprocess_mode: str = "passthrough"
+    input_channels: int = 1
+    input_semantics: str = "gray1"
     use_scratch: bool = False
 
     @classmethod
@@ -73,11 +78,13 @@ class JobConfig:
             conf=float(data.get("conf", 0.25)),
             iou=float(data.get("iou", 0.7)),
             max_det=int(data.get("max_det", 300)),
-            min_test_images=int(data.get("min_test_images", 100)),
+            min_test_images=int(data.get("min_test_images", 1)),
             min_cali_images=int(data.get("min_cali_images", 400)),
             cali_dataset_id=str(data.get("cali_dataset_id", "")),
             test_dataset_id=str(data.get("test_dataset_id", "")),
-            preprocess_mode=str(data.get("preprocess_mode", "grayscale_uniform")),
+            preprocess_mode=normalize_preprocess_mode(str(data.get("preprocess_mode", "passthrough"))),
+            input_channels=1,
+            input_semantics="gray1",
             use_scratch=bool(data.get("use_scratch", False)),
         )
 
@@ -103,6 +110,10 @@ class JobConfig:
         job_root = OUTPUT_DATA_ROOT / task_id
         if "use_scratch" not in kwargs:
             kwargs["use_scratch"] = TASK_SCRATCH_ROOT is not None
+        if "preprocess_mode" in kwargs:
+            kwargs["preprocess_mode"] = normalize_preprocess_mode(kwargs["preprocess_mode"])
+        kwargs.setdefault("input_channels", 1)
+        kwargs.setdefault("input_semantics", "gray1")
         cfg = cls(
             job_root=job_root,
             job_id=task_id,
@@ -224,8 +235,12 @@ class JobConfig:
     def onnx_eval_dir(self) -> Path:
         return self.results_dir / "onnx_eval"
 
+    def fpga_input_roundtrip_eval_dir(self) -> Path:
+        return self.results_dir / "fpga_input_roundtrip_eval"
+
     def fpga_eval_dir(self) -> Path:
-        return self.results_dir / "fpga_eval"
+        """Backward-compatible alias for older callers; new tasks use fpga_input_roundtrip_eval."""
+        return self.fpga_input_roundtrip_eval_dir()
 
     def test_label_wh_ref(self) -> Optional[int]:
         if not self.test_dataset_id:
@@ -236,3 +251,27 @@ class JobConfig:
 
     def bundle_zip_path(self) -> Path:
         return self.job_root / f"{self.job_id}_quantized_bundle.zip"
+
+    def input_abi(self) -> dict:
+        return {
+            "schema_version": 1,
+            "input_name": "images",
+            "input_shape": [1, self.input_channels, self.imgsz, self.imgsz],
+            "input_layout": "NCHW",
+            "input_dtype": "FLOAT16",
+            "input_semantics": self.input_semantics,
+            "preprocess_mode": self.preprocess_mode,
+            "normalization": "uint8 / 255.0",
+            "output_name": "output0",
+            "output_shape": [1, 4 + self.nc + 6, 34000],
+            "output_dtype": "FLOAT16",
+            "nc": self.nc,
+            "kpt_shape": [2, 3],
+            "fpga_source": {
+                "channels": 1,
+                "bit_depth": 12,
+                "width": 2000,
+                "height": 2000,
+                "bytes_per_row": 4096,
+            },
+        }

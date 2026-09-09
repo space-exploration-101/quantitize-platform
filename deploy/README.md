@@ -8,72 +8,32 @@
 
 ## API 环境包
 
-`yolov8_env.tar.gz`（约 8.7G）放在仓库外，不进入 Git，也不进入默认 Docker 构建上下文：
+当前生产 API 镜像基于 **`ywang/yolo-gray1-quant:ultralytics-8.3.98-v6`**（1 通道 gray1，Ultralytics 8.3.98）。不再解压仓库外的 `yolov8_env.tar.gz`（那是 8.4.6 / 3 通道旧环境）。
 
-它应保存在仓库之外；构建时通过 `ENV_ARCHIVE` 指向实际位置。
-
-`.gitignore` 与 `.dockerignore` 都排除 `*.tar.gz`，避免 `git add` 或 Web 构建把环境包装进去。
-
-P6 构建 API 镜像时，**不能**用 BuildKit secret：secret 上限 500KiB，装不下 8.7G 包。改用额外 build-context + `RUN --mount=type=bind`，解压进层、不把 tar 留在镜像里：
+构建：
 
 ```bash
 cd /data3/ywang/quantitize-platform
-ENV_ARCHIVE=/path/to/yolov8_env.tar.gz
-ctx=/tmp/p6_yolov8_env_ctx
-mkdir -p "$ctx"
-ln -sfn "$ENV_ARCHIVE" "$ctx/yolov8_env.tar.gz"
-DOCKER_BUILDKIT=1 docker build \
-  --build-context yolov8env="$ctx" \
-  -f deploy/Dockerfile.api \
-  -t quantitize-platform-api:latest \
-  .
+docker tag quantitize-platform-api:latest quantitize-platform-api:pre-gray1-20260910
+docker build -f deploy/Dockerfile.api -t quantitize-platform-api:latest .
 ```
 
-对应 Dockerfile 片段：
-
-```dockerfile
-RUN --mount=type=bind,from=yolov8env,source=yolov8_env.tar.gz,target=/tmp/yolov8_env.tar.gz \
-    mkdir -p /home/rs/miniconda3/envs/yolov8 \
-    && tar -xzf /tmp/yolov8_env.tar.gz -C /home/rs/miniconda3/envs/yolov8 \
-    && if [ -x /home/rs/miniconda3/envs/yolov8/bin/conda-unpack ]; then \
-         /home/rs/miniconda3/envs/yolov8/bin/conda-unpack; \
-       fi
-```
-
-打包文件顶层是 `bin/`、`lib/` 等，必须解压到 **`envs/yolov8`**，不要解压到 `envs/`。不要把该文件复制或符号链接进 `quantitize-platform/`。
-
-## 打包 API 镜像（GPU）
-
-```bash
-cd /data3/ywang/quantitize-platform
-ENV_ARCHIVE=/path/to/yolov8_env.tar.gz
-ctx=/tmp/p6_yolov8_env_ctx
-mkdir -p "$ctx"
-ln -sfn "$ENV_ARCHIVE" "$ctx/yolov8_env.tar.gz"
-DOCKER_BUILDKIT=1 docker build \
-  --build-context yolov8env="$ctx" \
-  -f deploy/Dockerfile.api \
-  -t quantitize-platform-api:latest \
-  .
-```
+旧 21GB conda 打包方式（`yolov8_env.tar.gz` + extra build-context）仅作历史参考，见仓库内 `deploy/Dockerfile.api` 更早版本 / 镜像标签 `pre-gray1-20260910`。
 
 检查：
 
 ```bash
-docker run --rm --gpus all quantitize-platform-api:latest nvidia-smi -L
-docker run --rm --gpus all quantitize-platform-api:latest \
-  /home/rs/miniconda3/envs/yolov8/bin/python -c \
-  "import torch, onnxruntime; print(torch.__version__); print(torch.cuda.is_available()); print(onnxruntime.__version__)"
-docker run --rm --gpus all quantitize-platform-api:latest \
-  /home/rs/miniconda3/envs/yolov8/bin/python pipeline/verify_runner.py
-docker run --rm --gpus all quantitize-platform-api:latest \
-  /home/rs/miniconda3/envs/yolov8/bin/python pipeline/verify_patches.py
+docker run --rm quantitize-platform-api:latest \
+  /opt/ywang/yolo-runtime/bin/python -c \
+  "import ultralytics, fastapi; print(ultralytics.__version__); print(fastapi.__version__)"
+docker run --rm quantitize-platform-api:latest \
+  /opt/ywang/yolo-runtime/bin/python pipeline/verify_runner.py
 ```
 
 ## 打包 Web 镜像
 
 ```bash
-cd /data3/ywang/quantitize-platform
+cd /home/rs/wrs/onnxviewe/quantitize-platform
 docker build -f deploy/Dockerfile.web -t quantitize-platform-web:latest .
 ```
 
@@ -90,7 +50,7 @@ docker compose -f deploy/docker-compose.web.yml build
 启动前必须把 `GPU_DEVICE_ID` 设置为管理员分配的单卡 UUID、卡号或 MIG UUID；不再向容器暴露全部 GPU。推荐使用 UUID，避免设备序号变化：
 
 ```bash
-cd /data3/ywang/quantitize-platform
+cd /home/rs/wrs/onnxviewe/quantitize-platform
 export GPU_DEVICE_ID=GPU-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 docker compose -f deploy/docker-compose.yml up -d --build
 ```
@@ -107,7 +67,7 @@ export GPU_READY_POLL_SECONDS=15
 
 端口：宿主机 **8088** → Web 8080，**8000** → API 8000。`WEB_DEMO_MODE=0`。
 
-浏览器：http://127.0.0.1:8088/ （当前 H200 局域网入口 http://10.2.29.180:8088 ）。
+浏览器：http://127.0.0.1:8088/ （局域网 http://10.2.26.132:8088 ）。
 
 禁止：`docker compose down -v`（会误伤命名卷；本编排用的是宿主机绑定挂载，停服务用普通 `down`）。
 

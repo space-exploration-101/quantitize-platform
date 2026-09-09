@@ -35,7 +35,7 @@
       {% endfor %}
     </select>
   </label>
-  <p class="hint">RGB：彩色预训练原方式；黑白三通道同值：平台统一标定；黑白 R 通道：先转灰度再放入 R；不做通道预处理：保持图片文件已有通道，适合已经是 R=灰度、G=B=0 的数据。</p>
+  <p class="hint">两种模式都把图变成 1 通道再送进量化模型。不做处理：已是灰度或 R-only（取 R，不跑 BGR2GRAY）。彩图转灰度：彩色图用 BGR2GRAY。resize 和 /255 两种都会做。</p>
   <p class="hint">新任务请换显示名，勿覆盖旧作业目录。选完后点下方「创建任务」，再在监控页「开始流水线」。</p>
   <label>模型 model.pt <input type="file" name="model_pt" accept=".pt" required></label>
   <button type="submit" {% if busy %}disabled{% endif %}>创建任务</button>
