@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}共享数据集{% endblock %}
+{% block content %}
+<h1>共享数据集</h1>
+<p>根目录：<code>{{ shared_root }}</code> — 标定/测试与任务分离，多任务通过符号链接复用。<strong>测试</strong>为原始 images/ + labels/；<strong>FPGA测试</strong>由各任务流水线步骤④从当前测试集转换，保存在 <code>output_data/&lt;task&gt;/fpga_test_pack/</code>。</p>
+<table>
+  <tr><th>类型</th><th>ID</th><th>名称</th><th>张数</th><th>路径</th><th>说明</th><th>操作</th></tr>
+  {% for row in rows %}
+  {% set d = row.entry %}
+  <tr>
+    <td>{{ row.kind_label }}</td>
+    <td><code>{{ d.id }}</code></td>
+    <td>{{ d.display_name }}</td>
+    <td>{% if d.image_count is not none %}{{ d.image_count }}{% else %}—{% endif %}</td>
+    <td><code>{{ d.rel_path }}</code></td>
+    <td>{{ d.note }}</td>
+    <td>{% if row.download_kind == 'fpga_test' %}<span class="hint">任务内生成</span>{% else %}<a class="btn-link" href="/datasets/{{ row.download_kind }}/{{ d.id }}/download">下载</a>{% endif %}</td>
+  </tr>
+  {% endfor %}
+</table>
+<p>初始化/刷新默认集：<code>python3 platform/09_bootstrap_shared_datasets.py</code></p>
+{% endblock %}

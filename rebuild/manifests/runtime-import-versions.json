@@ -1,0 +1,25 @@
+{
+  "captured_at": "2026-09-01",
+  "python": "3.9.25",
+  "imports": {
+    "numpy": "2.0.1",
+    "pandas": "2.3.3",
+    "torch": "2.8.0+cu128",
+    "torchvision": "0.23.0+cu128",
+    "onnx": "1.19.1",
+    "onnxruntime": "1.19.2",
+    "ultralytics": "8.4.6",
+    "cv2": "4.13.0",
+    "fastapi": "0.128.8",
+    "pydantic": "2.13.4"
+  },
+  "known_metadata_overlap": {
+    "numpy_dist_info": [
+      "numpy-1.26.4.dist-info",
+      "numpy-2.0.1.dist-info"
+    ],
+    "pip_list_reports": "1.26.4",
+    "runtime_imports": "2.0.1",
+    "rebuild_policy": "Do not reproduce duplicate metadata. Build a clean environment whose imported NumPy version is 2.0.1, then run all validation."
+  }
+}

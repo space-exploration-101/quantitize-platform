@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}{{ cfg.display_name }} — 体积分析{% endblock %}
+{% block content %}
+<h1>产物体积分析 — {{ cfg.display_name }}</h1>
+<p>{{ source_label }} · 合计 <strong>{{ inv.total_h }}</strong>（{{ inv.file_count }} 个文件）</p>
+<p class="hint">{{ slim_hint }}</p>
+{% if cfg.test_dataset_id %}
+<p>本任务绑定测试集 <code>{{ cfg.test_dataset_id }}</code>；FPGA 包路径：
+<code>output_data/{{ cfg.job_id }}/fpga_test_pack/</code></p>
+{% endif %}
+{% if cfg.cali_dataset_id %}
+<p>本任务绑定标定集 <code>{{ cfg.cali_dataset_id }}</code></p>
+{% endif %}
+
+<h2>按顶层目录</h2>
+<table>
+  <tr><th>目录</th><th>大小</th><th>占比</th></tr>
+  {% for row in inv.by_top_level %}
+  <tr>
+    <td><code>{{ row.name }}/</code></td>
+    <td>{{ row.size_h }}</td>
+    <td>{{ row.pct }}%</td>
+  </tr>
+  {% endfor %}
+</table>
+
+<h2>最大文件 Top 40</h2>
+<table>
+  <tr><th>路径</th><th>大小</th></tr>
+  {% for row in inv.largest_files %}
+  <tr>
+    <td><code>{{ row.path }}</code></td>
+    <td>{{ row.size_h }}</td>
+  </tr>
+  {% endfor %}
+</table>
+
+<p>
+  <a href="/tasks/{{ cfg.job_id }}">返回监控</a>
+  {% if has_zip %} · <a href="/tasks/{{ cfg.job_id }}/download">下载 zip</a>{% endif %}
+</p>
+{% endblock %}

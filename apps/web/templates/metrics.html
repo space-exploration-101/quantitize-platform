@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}精度对比 — {{ cfg.display_name }}{% endblock %}
+{% block main_class %}wide-metrics{% endblock %}
+{% block content %}
+<h1>精度对比 — {{ cfg.display_name }}</h1>
+<p>预处理模式: <strong>{{ preprocess_mode_label }}</strong> · 评测环境: <code>conda yolov8</code></p>
+
+<section class="eval-data-desc">
+  <h2>评测数据</h2>
+  <p>
+    测试集：<code>{{ eval_data.dataset_id }}</code>
+    {% if eval_data.dataset_name %}（{{ eval_data.dataset_name }}）{% endif %}
+    {% if eval_data.cali_dataset_id %} · 标定集：<code>{{ eval_data.cali_dataset_id }}</code>{% endif %}
+  </p>
+  <p>
+    共 <strong>{{ eval_data.n_images }}</strong> 张测试图，
+    本次评测跑完 <strong>{{ eval_data.n_eval }}</strong> 张，
+    类别数 nc=<strong>{{ eval_data.nc }}</strong>
+  </p>
+  {% if eval_data.classes %}
+  <table class="class-count-table">
+    <tr><th>类别</th><th>名称</th><th>实例数（框）</th><th>含该类的图数</th></tr>
+    {% for c in eval_data.classes %}
+    <tr>
+      <td>{{ c.id }}</td>
+      <td>{{ c.name }}</td>
+      <td>{{ c.instances }}</td>
+      <td>{{ c.images }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+</section>
+
+<table>
+  <tr><th>指标</th><th>PT</th><th>ONNX</th><th>FPGA 侧视</th></tr>
+  {% macro cell(s) %}{% if s is not none %}{{ '%.4f'|format(s) }}{% else %}—{% endif %}{% endmacro %}
+  <tr><td>Precision</td><td>{{ cell(pt.precision if pt else none) }}</td><td>{{ cell(onnx.precision if onnx else none) }}</td><td>{{ cell(fpga.precision if fpga else none) }}</td></tr>
+  <tr><td>Recall</td><td>{{ cell(pt.recall if pt else none) }}</td><td>{{ cell(onnx.recall if onnx else none) }}</td><td>{{ cell(fpga.recall if fpga else none) }}</td></tr>
+  <tr><td>F1</td><td>{{ cell(pt.f1 if pt else none) }}</td><td>{{ cell(onnx.f1 if onnx else none) }}</td><td>{{ cell(fpga.f1 if fpga else none) }}</td></tr>
+  <tr><td>mAP</td><td>{{ cell(pt.mAP if pt else none) }}</td><td>{{ cell(onnx.mAP if onnx else none) }}</td><td>{{ cell(fpga.mAP if fpga else none) }}</td></tr>
+  <tr><td>Pixel error (mean px)</td>
+    <td>{% if pt and pt.pixel_error %}{{ '%.2f'|format(pt.pixel_error.mean_px) }}{% else %}—{% endif %}</td>
+    <td>{% if onnx and onnx.pixel_error %}{{ '%.2f'|format(onnx.pixel_error.mean_px) }}{% else %}—{% endif %}</td>
+    <td>{% if fpga and fpga.pixel_error %}{{ '%.2f'|format(fpga.pixel_error.mean_px) }}{% else %}—{% endif %}</td>
+  </tr>
+  {% macro err_counts(s) %}
+    {% if s and s.error_group_counts %}
+      ClassErr {{ s.error_group_counts.get('class_error', 0) }} · FP {{ s.error_group_counts.get('fp', 0) }} · FN {{ s.error_group_counts.get('fn', 0) }}
+    {% elif s and s.error_case_count is not none %}
+      {{ s.error_case_count }} 图
+    {% else %}—{% endif %}
+  {% endmacro %}
+  <tr><td>问题图 (ClassErr / FP / FN)</td>
+    <td>{{ err_counts(pt) }}</td>
+    <td>{{ err_counts(onnx) }}</td>
+    <td>{{ err_counts(fpga) }}</td>
+  </tr>
+</table>
+
+{% if pt_success %}
+<details class="success-panel">
+  <summary>检测正确 — 抽样 ({{ pt_success|length }})</summary>
+  <p class="hint">来源 PT 评测 · 绿=真值 · 蓝=检对(TP)</p>
+  <p class="hint">抽样原则：优先从「TP&gt;0 且 FP=FN=0」的全对图中，用固定随机种子 <code>seed=42</code> 打乱后取最多 10 张；若全对图不足 10 张，再按误差少优先补齐。</p>
+  <div class="success-grid">
+    {% for c in pt_success %}
+    <article class="success-card">
+      <span class="success-badge">TP {{ c.TP }}</span>
+      {% if c.overlay %}
+      <img src="/tasks/{{ cfg.job_id }}/results/pt_eval/success_cases/{{ c.overlay }}{% if c.overlay_v %}?v={{ c.overlay_v }}{% endif %}" alt="{{ c.image }}" loading="lazy" title="{{ c.image }}">
+      {% endif %}
+      <p class="success-name">{{ c.image }}</p>
+    </article>
+    {% endfor %}
+  </div>
+</details>
+{% endif %}
+
+{% macro case_stats(c) %}
+<span class="tag tag-tp">TP {{ c.TP }}</span>
+{% if c.class_error %}<span class="tag tag-ce">ClassErr {{ c.class_error }}</span>{% endif %}
+{% if c.FP %}<span class="tag tag-fp">FP {{ c.FP }}</span>{% endif %}
+{% if c.FN %}<span class="tag tag-fn">FN {{ c.FN }}</span>{% endif %}
+{% endmacro %}
+
+{% macro error_kind_group(title, kind, eval_name, cases) %}
+{% if cases %}
+<details class="error-kind-panel">
+  <summary>{{ title }} ({{ cases|length }})</summary>
+  <div class="error-grid compact">
+    {% for c in cases %}
+    <article class="error-card">
+      <p class="error-stats">{{ case_stats(c) }}</p>
+      {% if c.overlay %}
+      <img src="/tasks/{{ cfg.job_id }}/results/{{ eval_name }}/error_cases/{{ c.overlay }}{% if c.overlay_v %}?v={{ c.overlay_v }}{% endif %}" alt="{{ c.image }}" loading="lazy">
+      {% endif %}
+      <h3>{{ c.image }}</h3>
+    </article>
+    {% endfor %}
+  </div>
+</details>
+{% endif %}
+{% endmacro %}
+
+{% macro eval_column(title, eval_name, groups) %}
+<details class="eval-column">
+  <summary>{{ title }} — ClassErr {{ groups.class_error|length }} · FP {{ groups.fp|length }} · FN {{ groups.fn|length }}</summary>
+  <p class="hint">紫=ClassErr · 红=FP · 黄描边=FN · 绿=GT · 蓝=TP</p>
+  {{ error_kind_group('类别错误 Class Error', 'class_error', eval_name, groups.class_error) }}
+  {{ error_kind_group('误检 FP', 'fp', eval_name, groups.fp) }}
+  {{ error_kind_group('漏检 FN', 'fn', eval_name, groups.fn) }}
+  {% if not groups.class_error and not groups.fp and not groups.fn %}
+  <p class="hint">无问题样本</p>
+  {% endif %}
+</details>
+{% endmacro %}
+
+<h2 class="errors-heading">问题样本对比</h2>
+<div class="eval-columns">
+  {{ eval_column('PT 评测', 'pt_eval', pt_errors) }}
+  {{ eval_column('ONNX 评测', 'onnx_eval', onnx_errors) }}
+  {{ eval_column('FPGA 侧视', 'fpga_eval', fpga_errors) }}
+</div>
+
+<p><a href="/tasks/{{ cfg.job_id }}">返回监控</a></p>
+{% endblock %}

@@ -1,0 +1,11 @@
+name: yolov8
+channels:
+  - defaults
+dependencies:
+  - python=3.9
+  - pandas
+  - eigen=3.4
+  - gtsam[version='>=4.2,<4.3']
+  - boost-cpp[version='<1.85']
+  - conda-pack
+prefix: /home/rs/miniconda3/envs/yolov8

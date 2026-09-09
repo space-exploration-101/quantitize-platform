@@ -1,0 +1,9 @@
+Latest verified H200 quantitize-platform snapshot:
+snapshot-20260902-182606
+
+Status: VERIFIED
+Created: 2026-09-02 Asia/Shanghai
+Restore guide: snapshot-20260902-182606/H200_RECOVERY.md
+Checksums: snapshot-20260902-182606/SHA256SUMS
+
+The project archive intentionally excludes data/output_data.

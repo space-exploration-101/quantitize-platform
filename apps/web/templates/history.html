@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}历史任务{% endblock %}
+{% block content %}
+<h1>历史任务</h1>
+<table>
+  <tr><th>显示名</th><th>任务 ID</th><th>状态</th><th>更新</th><th>操作</th></tr>
+  {% for r in rows %}
+  <tr>
+    <td>{{ r.display_name }}</td>
+    <td><code>{{ r.task_id }}</code></td>
+    <td>{{ r.status }}</td>
+    <td>{{ r.updated }}</td>
+    <td>
+      <a href="/tasks/{{ r.task_id }}">监控</a>
+      {% if r.has_zip %} · <a href="/tasks/{{ r.task_id }}/download">下载</a>{% endif %}
+      · <a href="/tasks/{{ r.task_id }}/input_manifest.md">清单</a>
+    </td>
+  </tr>
+  {% else %}
+  <tr><td colspan="5">暂无任务</td></tr>
+  {% endfor %}
+</table>
+{% endblock %}

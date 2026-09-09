@@ -1,0 +1,58 @@
+project: quantitize-platform
+schema_version: 1
+captured_at: 2026-09-01
+status: ready
+
+supported_target_baseline:
+  os_family: Linux
+  architecture: amd64
+  host_distributions:
+    preferred:
+      - Ubuntu 22.04
+      - Ubuntu 24.04
+      - RHEL 8.x
+      - RHEL 9.x
+    conditional:
+      - CentOS 8
+      - Rocky Linux compatible release
+  gpu_vendor: NVIDIA
+  expected_gpu:
+    - NVIDIA H200
+    - other CUDA-compatible NVIDIA GPUs
+  cuda_container_runtime: 12.8.1
+  recommended_minimum_driver: 570.26
+  required_torch_arch_for_h200: sm_90
+  current_torch_archs_include_sm_90: true
+
+rebuild_priority:
+  - level: 1
+    method: load_saved_docker_images
+    reproducibility: exact
+    asset: docker-images-api-web.tar.zst
+  - level: 2
+    method: rebuild_from_conda_pack
+    reproducibility: high_on_linux_amd64
+    asset: yolov8_env.tar.gz
+  - level: 3
+    method: rebuild_from_conda_and_pip_manifests
+    reproducibility: best_effort_requires_full_validation
+    assets:
+      - manifests/conda-explicit-linux-64.txt
+      - manifests/environment-full-linux-64.yml
+      - manifests/pip-list-linux-amd64.lock.txt
+
+hard_constraints:
+  - Target CPU architecture must be x86_64/amd64 for current image and conda-pack archive.
+  - Host NVIDIA driver and NVIDIA Container Toolkit must work before starting the API container.
+  - H200 validation must confirm sm_90, CUDAExecutionProvider, and a complete golden task.
+  - CentOS/RHEL with SELinux enforcing may require :Z labels on bind mounts.
+  - Host CUDA Toolkit is not required; the host driver and container runtime are required.
+
+known_limitations:
+  - No offline wheelhouse or mirrored Conda package repository is included.
+  - Future upstream package removal can prevent manifest-only reconstruction.
+  - apt repositories are not snapshotted; exact OS package audit manifests are included.
+  - pip check from pip 26.0.1 crashes while parsing an installed wheel tag and cannot be used as the sole dependency verdict.
+  - Source environment has duplicate NumPy 1.26.4/2.0.1 metadata; runtime imports NumPy 2.0.1.
+
+next_action: Read REBUILD_GUIDE.md and select rebuild level 1, 2, or 3.

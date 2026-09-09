@@ -1,0 +1,19 @@
+Quantitize Platform H200 snapshot: snapshot-20260902-182606
+Created from: H200:/data3/ywang/quantitize-platform
+Created at: 2026-09-02 (Asia/Shanghai)
+
+Included:
+- Project source, deployment files, Dockerfiles, rebuild manifests and Agent docs.
+- data/shared_data calibration and test datasets.
+- Current quantitize-platform-api:latest and quantitize-platform-web:latest images.
+- Original yolov8_env.tar.gz Conda environment snapshot.
+- Host, Docker, Compose, image and completed golden-task inventories.
+
+Explicitly excluded:
+- Every item below data/output_data.
+- Historical output-data.tar.zst from /data3/ywang/quantitize-migration.
+- NAS credentials, sudo passwords and SSH private keys.
+- Docker images unrelated to quantitize-platform.
+
+Restore entry point: H200_RECOVERY.md
+Integrity entry point: SHA256SUMS

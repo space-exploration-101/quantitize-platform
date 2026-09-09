@@ -1,0 +1,68 @@
+# syntax=docker/dockerfile:1
+# Quantitize Platform — API / Worker / Pipeline（GPU）
+# 在 quantitize-platform 根目录构建（不要 COPY yolov8_env.tar.gz）：
+#   ctx=/tmp/p6_yolov8_env_ctx
+#   mkdir -p "$ctx"
+#   ln -sfn /home/rs/wrs/onnxviewe/yolov8_env.tar.gz "$ctx/yolov8_env.tar.gz"
+#   DOCKER_BUILDKIT=1 docker build \
+#     --build-context yolov8env="$ctx" \
+#     -f deploy/Dockerfile.api \
+#     -t quantitize-platform-api:latest \
+#     .
+#
+# conda-pack 包在仓库外；.dockerignore 排除 *.tar.gz。
+# 基础镜像 Ubuntu 24.04，匹配本机 glibc 2.39。
+
+FROM nvidia/cuda:12.8.1-runtime-ubuntu24.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8 \
+    PYTHONUNBUFFERED=1 \
+    HOME=/home/rs \
+    PLATFORM_ROOT=/home/rs/wrs/onnxviewe/quantitize-platform \
+    OUTPUT_DATA_ROOT=/home/rs/wrs/onnxviewe/quantitize-platform/data/output_data \
+    SHARED_DATA_ROOT=/home/rs/wrs/onnxviewe/quantitize-platform/data/shared_data \
+    YOLOV8_PYTHON=/home/rs/miniconda3/envs/yolov8/bin/python \
+    CONDA_PREFIX=/home/rs/miniconda3/envs/yolov8 \
+    CONDA_DEFAULT_ENV=yolov8 \
+    PATH=/home/rs/miniconda3/envs/yolov8/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    NVIDIA_VISIBLE_DEVICES=all \
+    NVIDIA_DRIVER_CAPABILITIES=compute,utility \
+    PORT=8000
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        libgl1 \
+        libglib2.0-0 \
+        libgomp1 \
+        libsm6 \
+        libxext6 \
+        libxrender1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# 1) 已验证的 yolov8 环境：额外 build-context bind mount（secret 上限 500KiB，装不下 8.7G）
+#    docker build --build-context yolov8env=<仅含该 tar 的目录> ...
+RUN --mount=type=bind,from=yolov8env,source=yolov8_env.tar.gz,target=/tmp/yolov8_env.tar.gz \
+    mkdir -p /home/rs/miniconda3/envs/yolov8 \
+    && tar -xzf /tmp/yolov8_env.tar.gz -C /home/rs/miniconda3/envs/yolov8 \
+    && if [ -x /home/rs/miniconda3/envs/yolov8/bin/conda-unpack ]; then \
+         /home/rs/miniconda3/envs/yolov8/bin/conda-unpack; \
+       fi
+
+# 2) API 依赖（打包日期可能早于后来 pip 安装的 FastAPI）
+COPY apps/api/requirements.txt /tmp/api-requirements.txt
+RUN /home/rs/miniconda3/envs/yolov8/bin/python -m pip install --no-cache-dir -r /tmp/api-requirements.txt \
+    && rm -f /tmp/api-requirements.txt
+
+# 3) 平台代码；运行数据由宿主机挂载，镜像内只放空目录
+WORKDIR /home/rs/wrs/onnxviewe/quantitize-platform
+COPY apps/api/ /home/rs/wrs/onnxviewe/quantitize-platform/apps/api/
+COPY pipeline/ /home/rs/wrs/onnxviewe/quantitize-platform/pipeline/
+COPY patches/ /home/rs/wrs/onnxviewe/quantitize-platform/patches/
+RUN mkdir -p data/output_data data/shared_data \
+    && touch data/output_data/.gitkeep data/shared_data/.gitkeep
+
+EXPOSE 8000
+CMD ["/home/rs/miniconda3/envs/yolov8/bin/python", "-m", "uvicorn", \
+     "apps.api.app:app", "--host", "0.0.0.0", "--port", "8000"]

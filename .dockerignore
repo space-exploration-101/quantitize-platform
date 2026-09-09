@@ -1,0 +1,32 @@
+# Build context is the quantitize-platform root.
+# Web image only COPYs apps/web. API image (P6) COPYs apps/api, pipeline, and patches.
+# Do not exclude pipeline/, patches/, or apps/api — that would break the API image.
+
+.git
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.venv
+**/venv
+*.egg-info
+*.log
+logs
+.cache
+
+# 22G runtime data stays on the host and is mounted at runtime.
+data/shared_data/**
+!data/shared_data/.gitkeep
+data/output_data/**
+!data/output_data/.gitkeep
+
+# Weights, binaries, and archives must not enter the build context.
+**/*.pt
+**/*.onnx
+**/*.bin
+**/*.zip
+**/*.tar.gz
+
+# yolov8_env.tar.gz is intentionally not part of this context.
+# The API image unpacks it via an extra BuildKit build-context bind mount
+# from /home/rs/wrs/onnxviewe/yolov8_env.tar.gz (secrets cannot hold 8.7G).
+# See deploy/README.md section "API 环境包".

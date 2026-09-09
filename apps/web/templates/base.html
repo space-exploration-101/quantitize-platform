@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>{% block title %}量化流水线{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <nav>
+    <a href="/">新建任务</a>
+    <a href="/datasets">共享数据集</a>
+    <a href="/history">历史任务</a>
+    {% if busy %}<span class="badge">运行中: {{ current_job or '…' }}</span>{% endif %}
+  </nav>
+  <main class="{% block main_class %}{% endblock %}">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

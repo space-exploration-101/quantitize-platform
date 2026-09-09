@@ -1,0 +1,23 @@
+# Quantitize Platform — 前端镜像（M1）
+# 在 quantitize-platform 根目录构建:
+#   docker build -f deploy/Dockerfile.web -t quantitize-platform-web:latest .
+
+FROM python:3.11-slim-bookworm@sha256:d29f48a31a8b408ed19272ca1e7b10ebae13b240a27e862d3d4217c528e2e0c3
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8 \
+    PYTHONUNBUFFERED=1 \
+    API_BASE_URL=http://quantitize-api:8000 \
+    PORT=8080
+
+WORKDIR /app
+
+COPY rebuild/manifests/requirements.web.lock.txt /app/requirements.txt
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip install --no-cache-dir -r /app/requirements.txt
+
+COPY apps/web/ /app/
+
+EXPOSE 8080
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8080"]

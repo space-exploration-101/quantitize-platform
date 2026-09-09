@@ -1,0 +1,68 @@
+# Quantitize Platform — Web + API
+# 在 quantitize-platform 根目录:
+#   docker compose -f deploy/docker-compose.yml up -d --build
+#
+# API 镜像由 P6-T1 预先构建（含 yolov8 环境，约 21GB）。
+# --build 只重建 Web；不要在这里解压 yolov8_env.tar.gz。
+# 禁止: docker compose down -v （会误伤命名卷；本编排用的是宿主机绑定挂载）
+
+name: quantitize-platform
+
+services:
+  quantitize-api:
+    image: quantitize-platform-api:latest
+    container_name: quantitize-platform-api
+    ports:
+      - "${API_PORT:-8000}:8000"
+    environment:
+      PLATFORM_ROOT: /home/rs/wrs/onnxviewe/quantitize-platform
+      OUTPUT_DATA_ROOT: /home/rs/wrs/onnxviewe/quantitize-platform/data/output_data
+      SHARED_DATA_ROOT: /home/rs/wrs/onnxviewe/quantitize-platform/data/shared_data
+      YOLOV8_PYTHON: /home/rs/miniconda3/envs/yolov8/bin/python
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    volumes:
+      - ../data/output_data:/home/rs/wrs/onnxviewe/quantitize-platform/data/output_data
+      - ../data/shared_data:/home/rs/wrs/onnxviewe/quantitize-platform/data/shared_data
+      # 共享集符号链接指向旧项目 shared_data（只读）
+      - /home/rs/wrs/onnxviewe/quantitize/shared_data:/home/rs/wrs/onnxviewe/quantitize/shared_data:ro
+      # 代码热更新，避免每次改 Python 都重建 21GB API 镜像
+      - ../apps/api:/home/rs/wrs/onnxviewe/quantitize-platform/apps/api
+      - ../pipeline:/home/rs/wrs/onnxviewe/quantitize-platform/pipeline
+    # Compose v2.32 校验要求 list，不能写 gpus: all
+    gpus:
+      - driver: nvidia
+        count: all
+        capabilities: [gpu]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 8
+      start_period: 20s
+
+  quantitize-web:
+    image: quantitize-platform-web:latest
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.web
+    container_name: quantitize-platform-web
+    ports:
+      - "${PORT:-8088}:8080"
+    environment:
+      WEB_DEMO_MODE: "${WEB_DEMO_MODE:-0}"
+      API_BASE_URL: http://quantitize-api:8000
+      PORT: "8080"
+    volumes:
+      - ../apps/web:/app
+    depends_on:
+      quantitize-api:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 8
+      start_period: 10s

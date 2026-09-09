@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}新建任务 — 量化流水线{% endblock %}
+{% block content %}
+<h1>新建量化任务</h1>
+<p>推荐：<strong>仅上传 model.pt</strong>，标定/测试数据从 <a href="/datasets">共享数据集</a> 选择（多任务复用，不重复拷贝）。</p>
+{% if errors %}
+<div class="errors">
+  <h3>检校失败</h3>
+  <ul>{% for e in errors %}<li>{{ e.message }}</li>{% endfor %}</ul>
+</div>
+{% endif %}
+
+<h2>方式 A — 共享数据集（推荐）</h2>
+<form action="/tasks/shared" method="post" enctype="multipart/form-data" class="form-block">
+  <label>任务显示名 <input name="display_name" required value="{{ display_name or '' }}"></label>
+  <label>ONNX 基名 <input name="onnx_name" placeholder="默认同显示名"></label>
+  <label>标定数据集
+    <select name="cali_dataset_id" required>
+      {% for d in cali_datasets %}
+      <option value="{{ d.id }}">{{ d.display_name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>测试数据集（含 FPGA 测试包子目录）
+    <select name="test_dataset_id" required>
+      {% for d in test_datasets %}
+      <option value="{{ d.id }}">{{ d.display_name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>输入预处理
+    <select name="preprocess_mode" required>
+      {% for value, label in preprocess_modes %}
+      <option value="{{ value }}" {% if preprocess_mode == value %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <p class="hint">RGB：彩色预训练原方式；黑白三通道同值：平台统一标定；黑白 R 通道：数据集脚本 / readme 格式（R=灰度，G=B=0）。</p>
+  <p class="hint">新任务请换显示名，勿覆盖旧作业目录。选完后点下方「创建任务」，再在监控页「开始流水线」。</p>
+  <label>模型 model.pt <input type="file" name="model_pt" accept=".pt" required></label>
+  <button type="submit" {% if busy %}disabled{% endif %}>创建任务</button>
+</form>
+
+<h2>方式 B — 整包 zip 上传</h2>
+<p>结构：<code>model.pt</code>、<code>cali/</code>、<code>test/images/</code>、<code>test/labels/</code>（数据会拷入本任务，不复用共享集）</p>
+<form action="/tasks" method="post" enctype="multipart/form-data" class="form-block">
+  <label>任务显示名 <input name="display_name" required></label>
+  <label>ONNX 基名 <input name="onnx_name" placeholder="默认同显示名"></label>
+  <label>输入预处理
+    <select name="preprocess_mode" required>
+      {% for value, label in preprocess_modes %}
+      <option value="{{ value }}">{{ label }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>数据 zip <input type="file" name="zip_file" accept=".zip" required></label>
+  <button type="submit" {% if busy %}disabled{% endif %}>上传并创建</button>
+</form>
+{% endblock %}

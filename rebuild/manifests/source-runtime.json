@@ -1,0 +1,53 @@
+{
+  "captured_at": "2026-09-01",
+  "source_host": {
+    "os": "Ubuntu 24.04.3 LTS",
+    "kernel": "7.0.0-28-generic",
+    "architecture": "x86_64",
+    "glibc": "2.39",
+    "gpu": "NVIDIA GeForce RTX 5090",
+    "gpu_compute_capability": "12.0",
+    "driver": "580.173.02",
+    "docker": "29.1.3",
+    "docker_compose": "2.32.4",
+    "docker_buildx": "0.29.1",
+    "nvidia_container_toolkit": "1.19.0"
+  },
+  "api_runtime": {
+    "python": "3.9.25",
+    "torch": "2.8.0+cu128",
+    "torch_cuda": "12.8",
+    "cudnn": 91002,
+    "torch_arch_list": ["sm_70", "sm_75", "sm_80", "sm_86", "sm_90", "sm_100", "sm_120"],
+    "onnxruntime": "1.19.2",
+    "onnxruntime_providers": ["TensorrtExecutionProvider", "CUDAExecutionProvider", "CPUExecutionProvider"]
+  },
+  "images": {
+    "api": {
+      "tag": "quantitize-platform-api:latest",
+      "id": "sha256:39131c33957dfe1d924047bc7de3236e57f1c33f31e0291886d6c14d746d0ef6",
+      "architecture": "amd64",
+      "size_bytes": 21072416494
+    },
+    "web": {
+      "tag": "quantitize-platform-web:latest",
+      "id": "sha256:af4e5f40d7f9948b516d4584b935a190210b208e3f7809080034801ac46534a3",
+      "architecture": "amd64",
+      "size_bytes": 184723399
+    },
+    "api_base": {
+      "reference": "nvidia/cuda:12.8.1-runtime-ubuntu24.04",
+      "linux_amd64_manifest_digest": "sha256:828c4d878adcaa4265d80c95d8ec877149b49bb2419a4cf3bb6aa889bbb7ca2e",
+      "index_digest": "sha256:ebef3c171eeef0298e4eb2e4be843105edf3b8b0ac45e0b43acee358e8046867"
+    },
+    "web_base": {
+      "reference": "python:3.11-slim-bookworm",
+      "digest": "sha256:d29f48a31a8b408ed19272ca1e7b10ebae13b240a27e862d3d4217c528e2e0c3"
+    }
+  },
+  "environment_archive": {
+    "name": "yolov8_env.tar.gz",
+    "size_bytes": 9294862253,
+    "sha256": "bb66795409a56195830641d24620b37f7d3617bc4a424517d2885545d1ac7251"
+  }
+}

@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+
+# Logs and local caches
+*.log
+logs/
+.cache/
+.codex-backups/
+
+# Runtime data (host-mounted, never committed)
+data/shared_data/**
+!data/shared_data/.gitkeep
+data/output_data/**
+!data/output_data/.gitkeep
+
+# Models, binaries, and archives
+*.pt
+*.onnx
+*.bin
+*.tar.gz
+*.zip
+
+# Local secrets
+.env
+.env.*
+!.env.example
+.ssh/
+*.pem
+*.key
+credentials.*
+secrets.*

@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}{{ cfg.display_name }} — 监控{% endblock %}
+{% block content %}
+<meta http-equiv="refresh" content="5">
+<h1>{{ cfg.display_name }}</h1>
+<p>任务 ID: <code>{{ cfg.job_id }}</code> · 状态: <strong>{{ status }}</strong> · 预处理: <strong>{{ preprocess_mode_label }}</strong></p>
+{% if gpu_readiness %}
+<p>
+  GPU: <strong>{{ "就绪" if gpu_readiness.get('ready') else "等待资源" }}</strong>
+  {% if gpu_readiness.get('name') %}· {{ gpu_readiness.get('name') }}{% endif %}
+  {% if gpu_readiness.get('memory_free_mib') is not none %}· 空闲显存 {{ gpu_readiness.get('memory_free_mib') }} MiB{% endif %}
+  {% if gpu_readiness.get('utilization_percent') is not none %}· 利用率 {{ gpu_readiness.get('utilization_percent') }}%{% endif %}
+</p>
+{% if not gpu_readiness.get('ready') %}<p class="errors">{{ gpu_readiness.get('reason') }}</p>{% endif %}
+{% endif %}
+{% if worker_error %}<pre class="err">{{ worker_error }}</pre>{% endif %}
+{% if task_error and not worker_error %}<pre class="err">{{ task_error }}</pre>{% endif %}
+<ol class="steps">
+{% for step in steps %}
+  {% set st = manifest.steps.get(step, {}) %}
+  <li class="status-{{ st.get('status', 'pending') }}">{{ step }} — {{ st.get('status', 'pending') }}</li>
+{% endfor %}
+</ol>
+{% if status in ('pending', 'failed') and not busy %}
+<form action="/tasks/{{ cfg.job_id }}/start" method="post">
+  <button type="submit">{{ "重试流水线" if status == "failed" else "开始流水线" }}</button>
+</form>
+{% endif %}
+{% if status == 'waiting_gpu' %}
+<p>任务会自动轮询 GPU，资源达到门槛后开始执行。</p>
+<form action="/tasks/{{ cfg.job_id }}/cancel-wait" method="post">
+  <button type="submit">取消等待</button>
+</form>
+{% endif %}
+<p>
+  <a href="/tasks/{{ cfg.job_id }}/metrics">精度对比</a>
+  {% if has_zip %} · <a href="/tasks/{{ cfg.job_id }}/download">下载 zip</a>{% endif %}
+  · <a href="/tasks/{{ cfg.job_id }}/bundle_inventory">zip 体积分析</a>
+  · <a href="/tasks/{{ cfg.job_id }}/input_manifest.md">输入清单</a>
+</p>
+<h3>日志（尾部）</h3>
+<pre class="log">{{ log_tail }}</pre>
+{% endblock %}
