@@ -27,14 +27,13 @@ import _setup_local_onnxruntime  # noqa: E402
 
 import onnxruntime as ort
 import cv2
-from grayscale_preprocess import PREPROCESS_MODES, preprocess_by_mode
+from grayscale_preprocess import PREPROCESS_MODE_ALIASES, PREPROCESS_MODES, normalize_preprocess_mode, preprocess_by_mode
 
-def load_and_preprocess_real_image(image_path, target_size=(1280, 1280), preprocess_mode="grayscale_uniform"):
-    """加载和预处理真实图像；必须与 job_config.preprocess_mode 保持一致。"""
+def load_and_preprocess_real_image(image_path, target_size=(1280, 1280), preprocess_mode="passthrough"):
+    """加载和预处理真实图像；必须与 job_config.preprocess_mode 保持一致。输出 NCHW1。"""
     print(f"加载图像: {image_path}")
+    preprocess_mode = normalize_preprocess_mode(preprocess_mode)
     print(f"探针图预处理模式: {preprocess_mode}")
-    if preprocess_mode not in PREPROCESS_MODES:
-        raise ValueError(f"未知 preprocess_mode: {preprocess_mode!r}，可选 {PREPROCESS_MODES}")
 
     image_batch = preprocess_by_mode(
         image_path,
@@ -42,6 +41,8 @@ def load_and_preprocess_real_image(image_path, target_size=(1280, 1280), preproc
         target_size=target_size,
         dtype=np.float16,
     )
+    if image_batch.shape[1] != 1:
+        raise ValueError(f"preprocess produced {image_batch.shape}, expected 1-channel NCHW")
 
     print(f"图像形状: {image_batch.shape}")
     print(f"图像数据类型: {image_batch.dtype}")
@@ -510,7 +511,7 @@ def resolve_generate_bin_image(model_path):
     )
 
 
-def run_inference(quantized_model_path, preprocess_mode="grayscale_uniform"):
+def run_inference(quantized_model_path, preprocess_mode="passthrough"):
     image_path = resolve_generate_bin_image(quantized_model_path)
     print("准备输入数据...")
     print(f"探针图片: {image_path}")
@@ -951,15 +952,15 @@ if __name__ == "__main__":
     parser.add_argument("folder_path")
     parser.add_argument(
         "--preprocess-mode",
-        default=os.environ.get("GENERATE_BIN_PREPROCESS_MODE", "grayscale_uniform"),
-        choices=PREPROCESS_MODES,
-        help="探针图片预处理模式；应与 job_config.preprocess_mode 一致",
+        default=os.environ.get("GENERATE_BIN_PREPROCESS_MODE", "passthrough"),
+        choices=tuple(PREPROCESS_MODE_ALIASES),
+        help="探针图片预处理模式；应与 job_config.preprocess_mode 一致。输出始终 1 通道。",
     )
     args = parser.parse_args()
 
     model_path = args.model_path
     folder_path = args.folder_path
-    preprocess_mode = args.preprocess_mode
+    preprocess_mode = normalize_preprocess_mode(args.preprocess_mode)
     if folder_path[-1] != '/':
         folder_path = folder_path + '/'
     results, names, intput_data = run_inference(model_path, preprocess_mode=preprocess_mode)

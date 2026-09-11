@@ -2,8 +2,8 @@
 # 在 quantitize-platform 根目录:
 #   docker compose -f deploy/docker-compose.yml up -d --build
 #
-# API 镜像由 P6-T1 预先构建（含 yolov8 环境，约 21GB）。
-# --build 只重建 Web；不要在这里解压 yolov8_env.tar.gz。
+# API 镜像基于 ywang/yolo-gray1-quant:ultralytics-8.3.98-v6（1 通道）。
+# --build 会重建 Web；API 需先 docker build -f deploy/Dockerfile.api。
 # 禁止: docker compose down -v （会误伤命名卷；本编排用的是宿主机绑定挂载）
 
 name: quantitize-platform
@@ -22,10 +22,11 @@ services:
       TASK_SCRATCH_MIN_FREE_BYTES: "${TASK_SCRATCH_MIN_FREE_BYTES:-161061273600}"
       FPGA_PACK_WORKERS: "${FPGA_PACK_WORKERS:-8}"
       PT_EVAL_BATCH_SIZE: "${PT_EVAL_BATCH_SIZE:-8}"
-      # CUDA calibration passed two full A/B runs; CPU remains the fallback
-      # provider and can be forced with QUANTIZE_CALIBRATION_PROVIDER=cpu.
       QUANTIZE_CALIBRATION_PROVIDER: "${QUANTIZE_CALIBRATION_PROVIDER:-cuda}"
-      YOLOV8_PYTHON: /home/rs/miniconda3/envs/yolov8/bin/python
+      YOLOV8_PYTHON: /opt/ywang/yolo-runtime/bin/python
+      PYTHONPATH: /workspace/src/Yolo_fine/ultralytics
+      YOLO_INPUT_CHANNELS: "1"
+      YOLO_INPUT_SEMANTICS: gray1
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
       GPU_READINESS_REQUIRED: "${GPU_READINESS_REQUIRED:-1}"
       GPU_MIN_FREE_MIB: "${GPU_MIN_FREE_MIB:-24576}"
@@ -35,12 +36,9 @@ services:
       - ../data/output_data:/home/rs/wrs/onnxviewe/quantitize-platform/data/output_data
       - ../data/shared_data:/home/rs/wrs/onnxviewe/quantitize-platform/data/shared_data
       - /data1/ywang/quantitize-scratch:/scratch/quantitize
-      # H200 迁移后的共享集已解引用并恢复到 ../data/shared_data，
-      # 不再依赖 wrs 上旧项目的绝对路径。
-      # 代码热更新，避免每次改 Python 都重建 21GB API 镜像
+      # 代码热更新：宿主机 pipeline / API 覆盖镜像内副本
       - ../apps/api:/home/rs/wrs/onnxviewe/quantitize-platform/apps/api
       - ../pipeline:/home/rs/wrs/onnxviewe/quantitize-platform/pipeline
-    # 必须显式分配单卡或 MIG UUID；容器内会映射为逻辑 GPU 0。
     gpus:
       - driver: nvidia
         device_ids:

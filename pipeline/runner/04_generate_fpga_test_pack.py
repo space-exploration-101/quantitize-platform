@@ -154,6 +154,9 @@ def main() -> int:
         "fpga_input_size": FPGA_SIZE,
         "test_image_count": len(images),
         "preprocess_mode": cfg.preprocess_mode,
+        "input_channels": cfg.input_channels,
+        "input_semantics": cfg.input_semantics,
+        "model_input_shape": [1, cfg.input_channels, cfg.imgsz, cfg.imgsz],
     }
     (config_dir / "job_meta.json").write_text(
         json.dumps(job_meta, indent=2, ensure_ascii=False),
@@ -177,8 +180,9 @@ def main() -> int:
         "# FPGA 测试包\n\n"
         f"- 测试图数量: {len(images)}\n"
         f"- 预处理模式: `{cfg.preprocess_mode}`\n"
-        "- 方案 A: 源图 → 2000 png2bin → bin2png 侧视\n"
-        "- `passthrough` 模式下：源图按 R-only 处理，side_view 也保存为 R=gray,G=B=0\n"
+        f"- 模型输入 ABI: `[1,{cfg.input_channels},{cfg.imgsz},{cfg.imgsz}]` FP16 NCHW, `{cfg.input_semantics}`\n"
+        "- 方案 A: 源图 → 2000 png2bin → bin2png 侧视（单通道 PNG）\n"
+        "- `passthrough` / `color_to_gray` 都输出 1 通道；side_view 不再写成 R-only 三通道\n"
         "- 评估标签: labels_1280.json\n"
         "- 离线评估:\n\n"
         "```bash\n"

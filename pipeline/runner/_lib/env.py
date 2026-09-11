@@ -85,6 +85,7 @@ def _yolov8_python_candidates() -> List[Path]:
     home = Path.home()
     names = ("python3", "python")
     roots = [
+        Path("/opt/ywang/yolo-runtime/bin"),
         home / "miniconda3" / "envs" / YOLOV8_ENV / "bin",
         home / "anaconda3" / "envs" / YOLOV8_ENV / "bin",
         Path("/opt/conda/envs") / YOLOV8_ENV / "bin",

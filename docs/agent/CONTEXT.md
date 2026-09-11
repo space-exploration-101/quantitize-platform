@@ -1,153 +1,83 @@
 # Agent Context — Quantitize Platform
 
-```yaml
-schema: quantitize-agent-context/v1
-updated: 2026-09-02
-authority:
-  current_facts: this_file
-  operations: RUNBOOK.md
-  disaster_recovery: ../reference/RECOVERY.md
-  environment_rebuild: ../../rebuild/REBUILD_GUIDE.md
-  performance: ../reference/PERFORMANCE.md
-  historical_only: ../archive/
+更新时间：2026-09-11（Asia/Shanghai）。本页是结构和最近核验事实；GPU、磁盘、容器与任务状态仍需实时复查。
 
-control_machine:
-  os: Windows
-  workspace: E:\codex\quantitize
-  ssh_config: C:\Users\admin\.ssh\config
-  secrets_in_docs: prohibited
-  routes:
-    - destination: 10.2.29.0/24
-      gateway: 192.168.31.1
-      interface_index: 19
-      persistent: true
-      purpose: H200 bypasses Astrill
-    - destination: 10.2.26.0/24
-      gateway: 192.168.31.1
-      interface_index: 19
-      persistent: true
-      purpose: wrs/NAS bypass Astrill
+## 1. 主机与边界
 
-hosts:
-  production:
-    alias: H200
-    address: 10.2.29.180
-    user: ywang
-    hostname: user-Rack-Server
-    connection: direct
-    proxy_jump: prohibited
-    os_observed: Ubuntu 22.04.5 LTS
-    kernel_observed: 6.8.0-90-generic
-    architecture: x86_64
-    cpu: 2x Intel Xeon Gold 6530
-    logical_cpus: 128
-    numa_nodes: 4
-    memory: 1 TiB
-    shared_server: true
-  legacy:
-    alias: wrs
-    address: 10.2.26.132
-    user: rs
-    role: historical source only
+| 项 | 当前事实 |
+|---|---|
+| 控制端 | Windows，工作区 `E:\codex\quantitize` |
+| 生产连接 | `ssh H200` 直连 `ywang@10.2.29.180`；禁止 `wrs` 跳板 |
+| H200 主机 | `user-Rack-Server`，Ubuntu 22.04.5，x86_64 |
+| 计算资源 | 2× Xeon Gold 6530、1 TiB RAM、4× NVIDIA H200 NVL（每卡约 143771 MiB），MIG 关闭 |
+| 项目 | `/data3/ywang/quantitize-platform`，分支 `main` |
+| 当前 Git | HEAD `4b857c1`；单通道切换代码尚未提交，工作树非净 |
+| 数据盘 | 项目/结果在 `/data3` SATA；任务 scratch 在 `/data1/ywang/quantitize-scratch` NVMe |
 
-gpu:
-  count: 4
-  model: NVIDIA H200 NVL
-  memory_each_mib: 143771
-  driver_observed: 580.82.07
-  compute_capability: sm_90
-  mig: disabled
-  compose_assignment_uuid: GPU-1610284d-3afe-6e14-b8cb-bbbe40a1f28b
-  container_visible_index: 0
-  readiness:
-    required: true
-    min_free_mib: 32768
-    max_utilization_percent: 20
-    poll_seconds: 30
-  allocation_is_not_reservation: true
+共享机限制：不停止其他用户进程，不做全局 Docker/驱动/内核/APT 变更。GPU 设备号不是资源所有权；必须核对 UUID、进程用户和持续负载。
 
-project:
-  host_root: /data3/ywang/quantitize-platform
-  local_mirror: E:\codex\quantitize\h200-worktree
-  compose: deploy/docker-compose.yml
-  compose_env: deploy/.env
-  services:
-    api:
-      container: quantitize-platform-api
-      image: quantitize-platform-api:latest
-      image_id: sha256:39131c33957dfe1d924047bc7de3236e57f1c33f31e0291886d6c14d746d0ef6
-      url: http://10.2.29.180:8000
-      health: /health
-      readiness: /ready
-    web:
-      container: quantitize-platform-web
-      image: quantitize-platform-web:latest
-      image_id: sha256:af4e5f40d7f9948b516d4584b935a190210b208e3f7809080034801ac46534a3
-      url: http://10.2.29.180:8088
-      health: /health
-  restart_policy: unless-stopped
-  last_verified_state: healthy_idle
+## 2. 当前服务快照
 
-pipeline:
-  orchestrator: pipeline/runner/05_runner.py
-  calibration_provider_default: cuda
-  calibration_provider_fallback: cpu
-  performance_report: ../reference/PERFORMANCE_OPTIMIZATION_FINAL_20260903.md
-  latest_cuda_validation:
-    - id: 20260902_165033_perf_opt_h200_true_cuda_ab1
-      elapsed_seconds: 790.513
-      status: completed
-    - id: 20260902_170544_perf_opt_h200_true_cuda_ab2
-      elapsed_seconds: 725.451
-      status: completed
-  steps:
-    - pt_eval
-    - quantize
-    - onnx_eval
-    - fpga_test_pack
-    - fpga_eval
-    - generate_bin
-    - merge_bin
-    - bundle
-  golden_task:
-    id: 20260902_065807_test_h200
-    status: completed
-    calibration_dataset: aituosha_moon_500
-    test_dataset: aituosha_moon_840
-    preprocess: grayscale_r_channel
-    all_steps_completed: true
-    bundle_created: true
-    elapsed_seconds: 6252.678
+2026-09-11 14:39–14:44 核验：
 
-storage:
-  project_disk:
-    mount: /data3
-    medium: SATA SSD
-  docker_disk:
-    path: /data1/docker
-    medium: NVMe
-  shared_inputs: /data3/ywang/quantitize-platform/data/shared_data
-  task_outputs: /data3/ywang/quantitize-platform/data/output_data
-  output_data_system_backup: excluded
-  output_data_cleanup_requires_verified_archive: true
-  nas:
-    address: 10.2.26.26
-    share: //10.2.26.26/902_data
-    mount: /mnt/ywang-nas
-    mount_persistent: false
-    system_backup_root: /mnt/ywang-nas/0-项目/13-专项/4-代码/量化平台/H200
-    agent_docs: /mnt/ywang-nas/0-项目/13-专项/4-代码/量化平台/agent_context
-    latest_verified_snapshot: snapshot-20260902-182606
+| 服务 | 镜像 | 状态/入口 |
+|---|---|---|
+| API | `quantitize-platform-api:latest`，ID `sha256:4693858842e1…` | container healthy、worker idle；`8000` |
+| Web | `quantitize-platform-web:latest`，ID `sha256:7aef48747d3f…` | healthy；`8088` |
 
-permissions_and_safety:
-  ywang_in_docker_group: true
-  docker_access_is_root_equivalent: true
-  sudo_requires_password: true
-  password_storage: prohibited
-  no_stop_other_users: true
-  no_global_host_change_without_admin: true
-  forbidden_commands:
-    - docker compose down -v
-    - delete apt/dpkg lock files
-    - broad recursive delete with globs
+Compose 使用 `restart: unless-stopped`，API 绑定分配 UUID `GPU-1610284d-3afe-6e14-b8cb-bbbe40a1f28b`（历史上对应物理 GPU 3，容器内通常显示 0）。门禁为至少 32768 MiB 空闲、利用率不超过 20%、30 秒轮询。
+
+重要异常：API `/health` 正常，但 `/ready` 为 HTTP 503；API 容器中的 `nvidia-smi` 与 NVML 均报 `Failed to initialize NVML: Unknown Error`。所以当前创建任务可以成功，但开始后会等待 GPU。不要绕过门禁；先按 Runbook 诊断，任何容器重建都需确认无运行任务并获授权。
+
+## 3. 镜像内运行环境
+
+- API 基础镜像标签：`ywang/yolo-gray1-quant:ultralytics-8.3.98-v6`。
+- Python：3.12.12；PyTorch：2.8.0+cu128；ONNX：1.17.0；ONNX Runtime：1.24.3；OpenCV headless：4.11.0.86；NumPy：1.26.4。
+- Python：`/opt/ywang/yolo-runtime/bin/python`。
+- `PYTHONPATH=/workspace/src/Yolo_fine/ultralytics`；宿主机 `apps/api` 与 `pipeline` 热挂载覆盖镜像代码。
+- 当前 Compose 文件定义了 `YOLO_INPUT_CHANNELS=1`、`YOLO_INPUT_SEMANTICS=gray1`，但 2026-09-11 对运行中容器执行 `env` 未看到这两个变量，说明容器配置与工作树存在漂移；重建容器后才会同步（需先获授权并确认无任务）。
+- `pip show ultralytics` 观察为 8.4.21 editable，而基础镜像标签写 8.3.98；运行时来源存在版本标识不一致，重建或回归时必须记录实际导入文件与版本。
+
+## 4. 当前输入与输出 ABI
+
+当前新任务固定：
+
+```text
+input:  images, FLOAT16, NCHW [1,1,1280,1280]
+output: [1, 4 + nc + 6, 34000]
+21类:   [1,31,34000]；FPGA 对齐可为 [34000,32] FP16
 ```
+
+预处理只有两种：
+
+- `passthrough`：灰度/HWC1 保留；三通道取 OpenCV 的 R 通道，不执行 BGR2GRAY。
+- `color_to_gray`：彩图执行 BGR2GRAY。
+
+两者都会 resize、除以 255、转 NCHW1。PT 第一层和 ONNX 输入若不是 1 通道会被拒绝。训练和 FPGA 几何的未对齐项见 `../reference/MODEL_INPUT.md`；21 类输出见 `../reference/CLASS21_FPGA.md`。
+
+## 5. 流水线与验证边界
+
+编排入口：`pipeline/runner/05_runner.py`。八步是：
+
+```text
+pt_eval -> quantize -> onnx_eval -> fpga_test_pack
+-> fpga_input_roundtrip_eval -> generate_bin -> merge_bin -> bundle
+```
+
+当前单通道证据（任务 `20260909_191112_test_21_class_gray_input`）：PT F1 0.3418；ONNX 与输入回环 F1 0；`generate_bin` 有 21 层因 `KeyError: input` 失败；失败现场 506 个文件、约 3.4 GB，已校验归档。因此单通道 21 类尚未通过 ONNX 等价、BIN 生成或全流程验收。
+
+历史三通道证据（任务 `20260904_031656_test_21_class_pipeline_03`）：八步完成，PT/ONNX/回环 F1 均 0.9420，84 张测试图；这是切换到 NCHW1 以前的 R-only 三通道版本，只能用于结构和结果对照。
+
+历史二类性能回归（2026-09-02）：两次 CUDA 全流程分别 790.513 s 和 725.451 s，指标和 296 个 BIN 哈希一致。这证明当时的三通道流水线与性能优化，不证明当前单通道代码正确。见 `../CHANGELOG.md` 与 `../reference/PERFORMANCE.md`。
+
+## 6. 存储与备份
+
+- 共享输入：`data/shared_data`；永久任务元数据/结果：`data/output_data`。
+- `TASK_SCRATCH_ROOT=/data1/ywang/quantitize-scratch`；成功且 ZIP 校验后清理，失败先归档现场。
+- 系统备份排除 `data/output_data`。输出归档是独立任务，未经授权不得删除。
+- NAS：`//10.2.26.26/902_data`，临时挂载 `/mnt/ywang-nas`；不是持久挂载。
+- 最近记录的已验证系统快照：`snapshot-20260902-182606`，它是单通道切换前快照，不能直接代表当前生产版本。
+
+## 7. 事实路由
+
+操作命令见 `RUNBOOK.md`；流水线见 `../../pipeline/FLOW.md`；部署见 `../../deploy/README.md`；主题参考入口见 `../reference/README.md`；历史变更和测试见 `../CHANGELOG.md`。

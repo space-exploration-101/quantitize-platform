@@ -25,7 +25,7 @@ from shared_datasets import apply_test_dataset_nc, attach_datasets_to_job  # noq
 from validate_input import save_report, validate_job_input  # noqa: E402
 
 MAX_ZIP_BYTES = 5 * 1024 * 1024 * 1024
-DEFAULT_PREPROCESS = InputPreprocessMode.GRAYSCALE_UNIFORM.value
+DEFAULT_PREPROCESS = InputPreprocessMode.PASSTHROUGH.value
 
 
 def _http_400(detail: str) -> HTTPException:
@@ -115,7 +115,13 @@ def create_from_zip(
     except ValueError as e:
         raise _http_400(str(e)) from e
     oname = onnx_name.strip() or name
-    cfg = JobConfig.create_task(name, onnx_name=oname, preprocess_mode=mode)
+    cfg = JobConfig.create_task(
+        name,
+        onnx_name=oname,
+        preprocess_mode=mode,
+        input_channels=1,
+        input_semantics="gray1",
+    )
     tmp_zip = cfg.job_root / "_upload.zip"
     extract_tmp = cfg.job_root / "_extract"
     try:
@@ -232,6 +238,8 @@ def create_from_shared(
         "imgsz": imgsz,
         "cali_dataset_id": cali_id,
         "test_dataset_id": test_id,
+        "input_channels": 1,
+        "input_semantics": "gray1",
     }
     if min_cali_images is not None:
         extra["min_cali_images"] = min_cali_images

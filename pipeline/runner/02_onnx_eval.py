@@ -46,11 +46,10 @@ def preprocess_chw(
     side_view_mode: bool,
     preprocess_mode: str,
 ) -> tuple[np.ndarray, tuple[int, int], tuple[int, int]]:
-    """返回 (3,H,W) float16 与原始/预处理尺寸。"""
+    """返回 (1,H,W) float16 与原始/预处理尺寸。"""
     img = imread_unicode(img_path)
     orig_h, orig_w = img.shape[:2]
-    # direct 与 FPGA 输入 roundtrip 评估都必须遵守 job_config.preprocess_mode。
-    # 对当前 21 类 R-only 模型，side_view 也应为 R=gray, G/B=0，不能灰度复制三通道。
+    # direct 与 FPGA 输入 roundtrip 都必须遵守 job_config.preprocess_mode，输出始终 1 通道。
     chw = preprocess_bgr_by_mode(img, preprocess_mode, (imgsz, imgsz), dtype=np.float16)[0]
     return chw, (orig_h, orig_w), (imgsz, imgsz)
 
@@ -129,7 +128,7 @@ def run_onnx_eval(
     session, input_name, output_name, max_ort_batch = create_onnx_eval_session(model_path)
 
     # CUDA 预热，避免首张图统计失真
-    warmup = np.zeros((1, 3, ev.imgsz, ev.imgsz), dtype=np.float16)
+    warmup = np.zeros((1, cfg.input_channels, ev.imgsz, ev.imgsz), dtype=np.float16)
     session.run([output_name], {input_name: warmup})
 
     per_image: list[dict] = []

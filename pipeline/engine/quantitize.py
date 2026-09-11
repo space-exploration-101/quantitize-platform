@@ -30,7 +30,7 @@ from onnx import helper
 import numpy as np
 print(f"onnxruntime 模块路径: {ort.__file__}")
 
-from grayscale_preprocess import PREPROCESS_MODES, preprocess_by_mode  # noqa: E402
+from grayscale_preprocess import PREPROCESS_MODES, normalize_preprocess_mode, preprocess_by_mode  # noqa: E402
 from typing import List, Optional, Union  # noqa: E402
 
 _IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
@@ -126,14 +126,11 @@ def load_calibration_paths(file_path):
 
 
 class PoseCalibrationDataReader(CalibrationDataReader):
-    def __init__(self, image_paths, preprocess_mode: str = "grayscale_uniform"):
+    def __init__(self, image_paths, preprocess_mode: str = "passthrough"):
         self.image_paths = image_paths
         self.idx = 0
         self.input_name = "images"  # YOLOv8 标准输入名称
-        mode = (preprocess_mode or "grayscale_uniform").strip()
-        if mode not in PREPROCESS_MODES:
-            raise ValueError(f"未知 preprocess_mode: {mode!r}，可选 {PREPROCESS_MODES}")
-        self.preprocess_mode = mode
+        self.preprocess_mode = normalize_preprocess_mode(preprocess_mode)
 
     def preprocess(self, img_path):
         try:
@@ -668,7 +665,7 @@ def quantize_static_inner(excluded_nodes_file, calibration_data_reader, model_ou
     print_memory_usage("量化完成后")
     #量化时间：6min25s
 
-def load_calibration_folder(current_folder, cali_dir=None, preprocess_mode="grayscale_uniform"):
+def load_calibration_folder(current_folder, cali_dir=None, preprocess_mode="passthrough"):
     calibration_folder = resolve_calibration_folder(current_folder, cali_dir=cali_dir)
 
     # 创建校准图片路径列表文件（保存在 workspace/info_txt）
@@ -778,6 +775,25 @@ def convert_pt_to_onnx_fp16(pt_model_path, output_onnx_path, imgsz=1280, dynamic
         return None
 
 
+def validate_input_contract(model_path: str, preprocess_mode: str) -> None:
+    """量化模型 ABI 固定为 [1,1,1280,1280] FLOAT16；与网页预处理无关。"""
+    model = onnx.load(model_path, load_external_data=False)
+    if not model.graph.input:
+        raise ValueError(f"ONNX has no graph input: {model_path}")
+    dims = [dim.dim_value or dim.dim_param for dim in model.graph.input[0].type.tensor_type.shape.dim]
+    try:
+        channels = int(dims[1]) if len(dims) >= 2 else None
+    except (TypeError, ValueError):
+        channels = dims[1] if len(dims) >= 2 else None
+    if len(dims) != 4 or channels != 1 or list(dims[2:]) != [1280, 1280]:
+        raise ValueError(
+            f"ONNX input ABI mismatch for {preprocess_mode}: got={dims}, "
+            f"expected=[1,1,1280,1280] (gray1, 1-channel)"
+        )
+    if model.graph.input[0].type.tensor_type.elem_type != onnx.TensorProto.FLOAT16:
+        raise ValueError(f"ONNX input must be FLOAT16: {model_path}")
+    print(f"✓ ONNX input ABI: {dims}, FLOAT16, semantics=gray1, preprocess={preprocess_mode}")
+
 
 if __name__ == '__main__':
     # 参数顺序：folder_path, onnx_name, model_path (与 process_pipeline.py 保持一致)
@@ -788,16 +804,17 @@ if __name__ == '__main__':
     parser.add_argument("onnx_name", help="ONNX 基名（不含扩展名）")
     parser.add_argument("model_path", help="原始 *.pt 路径")
     parser.add_argument("--cali-dir", default=None, help="校准图目录（可选）")
-    parser.add_argument("--preprocess-mode", default=None, help="预处理模式（可选）")
+    parser.add_argument("--preprocess-mode", default=None, help="预处理模式（passthrough | color_to_gray）")
     args = parser.parse_args()
 
     current_folder = args.folder_path
     onnx_name = args.onnx_name
     pt_model_path = args.model_path
     cali_dir = args.cali_dir
-    preprocess_mode = (args.preprocess_mode or "grayscale_uniform").strip()
-    if preprocess_mode not in PREPROCESS_MODES:
-        print(f"错误: 未知 --preprocess-mode={preprocess_mode!r}，可选 {PREPROCESS_MODES}")
+    try:
+        preprocess_mode = normalize_preprocess_mode(args.preprocess_mode or "passthrough")
+    except ValueError as exc:
+        print(f"错误: {exc}")
         sys.exit(2)
 
     
@@ -825,7 +842,9 @@ if __name__ == '__main__':
         model_path = converted_path
     else:
         print(f"✓ ONNX 文件已存在，跳过转换: {model_path}")
-    
+
+    validate_input_contract(model_path, preprocess_mode)
+
     model_output = f'{current_folder}/{onnx_name}.onnx'
     # 指定模型路径和输出文件
     output_file = f"{current_folder}/{os.path.basename(model_path).replace('.onnx', 'excluded_node_types.txt')}"
@@ -842,6 +861,7 @@ if __name__ == '__main__':
     )
    
     quantize_static_inner(excluded_nodes_file, calibration_data_reader, model_output, model_path)
+    validate_input_contract(model_output, preprocess_mode)
 
 
     # # 使用修改后的函数

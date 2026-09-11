@@ -1,0 +1,15 @@
+---
+description: YOLO pose gray1 leftover training issues. Read before data preprocess, FPGA-aligned image pipeline, or gray1 retraining.
+globs: "**/{*preprocess*,*train*,*dataset*,grayscale_preprocess.py}"
+alwaysApply: false
+---
+
+# Gray1 训练遗留问题
+
+详见 `docs/agent/YOLO_GRAY1_TRAINING_LEFTOVERS.md` 与 `/data3/ywang/docs/agent/YOLO_GRAY1_TRAINING_LEFTOVERS.md`。
+
+1. 1680 子集（约 1200 张）不是生产基线；从零 50 epoch 过拟合。
+2. 训练 4096→1280 letterbox ≠ FPGA 2000→8bit→2×2 均值 1000→pad140→1280。下一轮预处理必须按 FPGA 几何。
+3. 有 R-only 权重时迁移除第一层外的参数，不要再从零训 1 通道。
+4. Step14 ONNX F1=0 是评测管线问题。
+5. 平台现只接受 1 通道：`passthrough` | `color_to_gray`。
