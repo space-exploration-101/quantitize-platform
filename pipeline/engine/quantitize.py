@@ -599,9 +599,6 @@ def quantize_static_inner(excluded_nodes_file, calibration_data_reader, model_ou
         excluded_nodes = f.read().splitlines()
     # excluded_nodes += ['/model.4/m.5/cv2/conv/Conv']
     # import ipdb;ipdb.set_trace()
-    tensor_quant_overrides = {
-        'images': [{'quant_type': None}]  # 不量化images张量
-    }
     extra_options = {
         'CalibrateMethod': 'Entropy',
         'num_bins': 1024,  # 进一步增加到1024
@@ -647,6 +644,7 @@ def quantize_static_inner(excluded_nodes_file, calibration_data_reader, model_ou
                 model_output=model_output,
                 calibration_data_reader=calibration_data_reader,
                 quant_format=QuantFormat.QDQ,
+                op_types_to_quantize=["Conv"],
                 activation_type=QuantType.QInt16,  # 激活值采用16位
                 weight_type=QuantType.QInt8,
                 per_channel=True,
@@ -664,6 +662,75 @@ def quantize_static_inner(excluded_nodes_file, calibration_data_reader, model_ou
     # 量化后打印内存状态
     print_memory_usage("量化完成后")
     #量化时间：6min25s
+
+
+def validate_weight_only_qdq(model_input, model_output):
+    """Enforce the legacy contract: FP activations and per-channel QInt8 Conv weights."""
+    float_model = onnx.load(model_input, load_external_data=True)
+    quant_model = onnx.load(model_output, load_external_data=True)
+    float_initializers = {
+        item.name: onnx.numpy_helper.to_array(item) for item in float_model.graph.initializer
+    }
+    quant_initializers = {
+        item.name: onnx.numpy_helper.to_array(item) for item in quant_model.graph.initializer
+    }
+    producers = {output: node for node in quant_model.graph.node for output in node.output}
+    quantize_nodes = [node for node in quant_model.graph.node if node.op_type == "QuantizeLinear"]
+    activation_dq = []
+    weight_dq = []
+    collapsed_channels = []
+
+    for node in quant_model.graph.node:
+        if node.op_type != "DequantizeLinear" or not node.input:
+            continue
+        if node.input[0] in quant_initializers:
+            weight_dq.append(node)
+        else:
+            activation_dq.append(node)
+
+    conv_nodes = [node for node in quant_model.graph.node if node.op_type == "Conv"]
+    unquantized_weights = []
+    for node in conv_nodes:
+        if len(node.input) < 2:
+            unquantized_weights.append(node.name)
+            continue
+        dq_node = producers.get(node.input[1])
+        if dq_node is None or dq_node.op_type != "DequantizeLinear":
+            unquantized_weights.append(node.name)
+            continue
+        quantized_name = dq_node.input[0]
+        scale_name = dq_node.input[1]
+        quantized = quant_initializers.get(quantized_name)
+        scales = quant_initializers.get(scale_name)
+        float_name = quantized_name.removesuffix("_quantized")
+        original = float_initializers.get(float_name)
+        if quantized is None or scales is None or original is None:
+            continue
+        scales = np.asarray(scales, dtype=np.float64)
+        if not np.all(np.isfinite(scales)) or np.any(scales <= 0):
+            raise RuntimeError(f"invalid weight scale for node={node.name}: {scale_name}")
+        if quantized.ndim and original.shape == quantized.shape:
+            for channel in range(quantized.shape[0]):
+                if np.any(original[channel] != 0) and not np.any(quantized[channel] != 0):
+                    collapsed_channels.append(f"{node.name}[{channel}]")
+
+    errors = []
+    if quantize_nodes:
+        errors.append(f"activation QuantizeLinear count={len(quantize_nodes)}")
+    if activation_dq:
+        errors.append(f"activation DequantizeLinear count={len(activation_dq)}")
+    if len(weight_dq) != len(conv_nodes):
+        errors.append(f"weight DQ count={len(weight_dq)}, Conv count={len(conv_nodes)}")
+    if unquantized_weights:
+        errors.append(f"Conv weights without DQ={unquantized_weights[:5]}")
+    if collapsed_channels:
+        errors.append(f"nonzero weight channels collapsed to zero={collapsed_channels[:10]}")
+    if errors:
+        raise RuntimeError("weight-only QDQ contract failed: " + "; ".join(errors))
+    print(
+        f"✓ weight-only QDQ contract: Conv={len(conv_nodes)}, "
+        f"weight_DQ={len(weight_dq)}, activation_QDQ=0"
+    )
 
 def load_calibration_folder(current_folder, cali_dir=None, preprocess_mode="passthrough"):
     calibration_folder = resolve_calibration_folder(current_folder, cali_dir=cali_dir)
@@ -861,6 +928,7 @@ if __name__ == '__main__':
     )
    
     quantize_static_inner(excluded_nodes_file, calibration_data_reader, model_output, model_path)
+    validate_weight_only_qdq(model_path, model_output)
     validate_input_contract(model_output, preprocess_mode)
 
 
