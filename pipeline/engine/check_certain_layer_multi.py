@@ -6,6 +6,8 @@
 修正版本：确保同时导出和打印输入输出数据
 """
 
+import hashlib
+import json
 import sys
 import os
 
@@ -28,6 +30,91 @@ import _setup_local_onnxruntime  # noqa: E402
 import onnxruntime as ort
 import cv2
 from grayscale_preprocess import PREPROCESS_MODE_ALIASES, PREPROCESS_MODES, normalize_preprocess_mode, preprocess_by_mode
+
+
+class GenerateBinTensorContractError(RuntimeError):
+    """Raised when an FPGA export tensor cannot be resolved exactly."""
+
+
+def _model_value_info(model):
+    return {
+        info.name: info
+        for info in list(model.graph.input) + list(model.graph.value_info) + list(model.graph.output)
+    }
+
+
+def _model_producers(model):
+    return {output: node for node in model.graph.node for output in node.output}
+
+
+def _clone_value_info(info, name):
+    cloned = onnx.ValueInfoProto()
+    cloned.CopyFrom(info)
+    cloned.name = name
+    return cloned
+
+
+def _resolve_dequantized_value_info(tensor_name, value_info, producers):
+    """Resolve DQ output metadata from the float tensor feeding its Q/DQ pair."""
+    direct = value_info.get(tensor_name)
+    if direct is not None:
+        return _clone_value_info(direct, tensor_name)
+
+    dq_node = producers.get(tensor_name)
+    if dq_node is None or dq_node.op_type != "DequantizeLinear" or not dq_node.input:
+        return None
+    quantized_name = dq_node.input[0]
+    q_node = producers.get(quantized_name)
+    if q_node is None or q_node.op_type != "QuantizeLinear" or not q_node.input:
+        return None
+    source_info = value_info.get(q_node.input[0])
+    if source_info is None:
+        return None
+    return _clone_value_info(source_info, tensor_name)
+
+
+def instrument_conv_inputs(model):
+    """Return a model copy exposing every Conv data input under its exact tensor name."""
+    instrumented = onnx.ModelProto()
+    instrumented.CopyFrom(model)
+    value_info = _model_value_info(instrumented)
+    producers = _model_producers(instrumented)
+    graph_outputs = {info.name for info in instrumented.graph.output}
+    added = []
+    unresolved = []
+
+    for node in instrumented.graph.node:
+        if node.op_type != "Conv" or not node.input:
+            continue
+        tensor_name = node.input[0]
+        if tensor_name in graph_outputs:
+            continue
+        info = _resolve_dequantized_value_info(tensor_name, value_info, producers)
+        if info is None:
+            unresolved.append(f"{node.name}: {tensor_name}")
+            continue
+        instrumented.graph.output.append(info)
+        graph_outputs.add(tensor_name)
+        value_info[tensor_name] = info
+        added.append(tensor_name)
+
+    if unresolved:
+        detail = "; ".join(unresolved[:10])
+        if len(unresolved) > 10:
+            detail += f"; ... ({len(unresolved)} total)"
+        raise GenerateBinTensorContractError(
+            f"cannot expose exact Conv inputs: {detail}"
+        )
+    return instrumented, added
+
+
+def _require_result_fields(result, node_name, fields):
+    missing = [field for field in fields if result is None or result.get(field) is None]
+    if missing:
+        available = sorted(result) if isinstance(result, dict) else []
+        raise GenerateBinTensorContractError(
+            f"node={node_name} missing={','.join(missing)} available={available}"
+        )
 
 def load_and_preprocess_real_image(image_path, target_size=(1280, 1280), preprocess_mode="passthrough"):
     """加载和预处理真实图像；必须与 job_config.preprocess_mode 保持一致。输出 NCHW1。"""
@@ -371,9 +458,7 @@ def create_model_with_specific_output(model_path, target_layer_name, model=None)
     print(f"输入: {target_node.input}")
     print(f"输出: {target_node.output}")
     # 获取层的输入输出信息
-    value_info = {}
-    for info in model.graph.value_info:
-        value_info[info.name] = info
+    value_info = _model_value_info(model)
     
     # 创建新的输出信息
     new_outputs = []
@@ -518,9 +603,21 @@ def run_inference(quantized_model_path, preprocess_mode="passthrough"):
     image = load_and_preprocess_real_image(image_path, preprocess_mode=preprocess_mode)
     input_data = {'images': image}
     
-    quantized_session = ort.InferenceSession(quantized_model_path)
+    try:
+        model = onnx.load(quantized_model_path, load_external_data=True)
+    except Exception:
+        model = onnx.load(quantized_model_path)
+    instrumented_model, added_outputs = instrument_conv_inputs(model)
+    print(f"generate_bin 临时增加 {len(added_outputs)} 个精确 Conv 输入观察口")
+    quantized_session = ort.InferenceSession(instrumented_model.SerializeToString())
     quantized_results = quantized_session.run(None, input_data)
-    return quantized_results, [i.name for i in  quantized_session.get_outputs()],input_data
+    return (
+        quantized_results,
+        [i.name for i in quantized_session.get_outputs()],
+        input_data,
+        instrumented_model,
+        added_outputs,
+    )
 
 def export_specific_layer_io(quantized_results, input_data, names, model_path, target_layer_name, model=None):
     """
@@ -765,9 +862,11 @@ def save_data_as_text(data, file_path, dtype='float16', is_txt=False, is_npy=Fal
     
 
 def save_cbs(results, input_data, names, model_path, folder_name, layer_name, cnt, folder_path, is_txt=False, model=None):
+    conv_node = f'{layer_name}/conv/Conv'
+    result = get_quant_weight(results, input_data, names, model_path, conv_node, model=model)
+    _require_result_fields(result, conv_node, ('input', 'weight_quantized', 'scale', 'bias', 'output'))
     out_dir = os.path.join(folder_path.rstrip(os.sep), folder_name)
     os.makedirs(out_dir, exist_ok=True)
-    result = get_quant_weight(results, input_data, names, model_path, f'{layer_name}/conv/Conv', model=model)
     fp_input   = result['input']
     int_wt     = result['weight_quantized']
     fp_bn      =  np.column_stack((result['bias'], result['scale'] * 1000)).astype(np.float16)
@@ -778,7 +877,9 @@ def save_cbs(results, input_data, names, model_path, folder_name, layer_name, cn
     save_data_as_text(int_wt, folder_path + folder_name + "/" + folder_name + "_conv_wt.txt", dtype='int8', is_txt=is_txt)
     save_data_as_text(fp_bn, folder_path + folder_name + "/" + folder_name + "_conv_bn.txt", is_txt=is_txt)
     save_data_as_text(fp_golden, folder_path + folder_name + "/" + folder_name + "_conv_output.txt", is_txt=is_txt)
-    result = get_quant_weight(results, input_data, names, model_path, f'{layer_name}/act/Mul', model=model)
+    activation_node = f'{layer_name}/act/Mul'
+    result = get_quant_weight(results, input_data, names, model_path, activation_node, model=model)
+    _require_result_fields(result, activation_node, ('output',))
     fp_golden  = result['output']
     save_data_as_text(fp_golden, folder_path + folder_name + "/" + folder_name + "_silu_output.txt", is_txt=is_txt)
     cnt += 1
@@ -786,9 +887,11 @@ def save_cbs(results, input_data, names, model_path, folder_name, layer_name, cn
     return cnt
 
 def save_conv(results, input_data, names, model_path, folder_name, layer_name, cnt, folder_path, is_txt=False, model=None):
+    conv_node = f'{layer_name}/Conv'
+    result = get_quant_weight(results, input_data, names, model_path, conv_node, model=model)
+    _require_result_fields(result, conv_node, ('input', 'weight_quantized', 'scale', 'bias', 'output'))
     out_dir = os.path.join(folder_path.rstrip(os.sep), folder_name)
     os.makedirs(out_dir, exist_ok=True)
-    result = get_quant_weight(results, input_data, names, model_path, f'{layer_name}/Conv', model=model)
     fp_input   = result['input']
     int_wt     = result['weight_quantized']
     fp_bn      =  np.column_stack((result['bias'], result['scale'] * 1000)).astype(np.float16)
@@ -803,6 +906,7 @@ def save_add(results, input_data, names, model_path, layer_idx, operator, cnt, l
     folder_name = f'T32_L{layer_idx:02d}_s{cnt:02d}'
     if 'c2f' in layer_name:
         result = get_quant_weight(results, input_data, names, model_path, operator, model=model)
+        _require_result_fields(result, operator, ('output',))
         fp_golden  = result['output']
         save_data_as_text(fp_golden, folder_path + folder_name + "/" + folder_name + "_shortcut_output.txt", is_txt=is_txt)
     return cnt
@@ -810,6 +914,7 @@ def save_add(results, input_data, names, model_path, layer_idx, operator, cnt, l
 def save_extra_layer(results, input_data, names, model_path, layer_idx, operator, cnt, folder_path, name, is_txt=False, model=None):
     folder_name = f'T32_L{layer_idx:02d}_s{cnt:02d}'
     result = get_quant_weight(results, input_data, names, model_path, operator, model=model)
+    _require_result_fields(result, operator, ('input', 'output'))
     fp_golden  = result['output']
     fp_input = result['input']
     save_data_as_text(fp_golden, folder_path + folder_name + "/" + folder_name + f"_{name}_output.txt", is_txt=is_txt)
@@ -875,6 +980,7 @@ def save_head(results, input_data, names, model_path, layer_idx, folder_path, mo
         os.makedirs(folder_path + 'extra_layer', exist_ok=True)
     for layer, key, output_name in output_list:
         result = get_quant_weight(results, input_data, names, model_path, layer, model=model)
+        _require_result_fields(result, layer, (key,))
         try:
             if 'tmp' in output_name:
                 save_data_as_text(result[key], folder_path + 'extra_layer' + "/" +  f"{output_name}.npy", is_npy=False)
@@ -942,6 +1048,33 @@ def _process_one_layer(layer_idx, results, input_data, names, model_path, operat
 
 NUM_LAYERS = 32  # 导出层 0～31
 
+
+def _write_export_inventory(folder_path, model_path, added_outputs):
+    files = []
+    root = os.path.abspath(folder_path)
+    for current_root, _, names in os.walk(root):
+        for name in sorted(names):
+            path = os.path.join(current_root, name)
+            digest = hashlib.sha256()
+            with open(path, 'rb') as stream:
+                for chunk in iter(lambda: stream.read(8 * 1024 * 1024), b''):
+                    digest.update(chunk)
+            files.append({
+                'path': os.path.relpath(path, root).replace(os.sep, '/'),
+                'size_bytes': os.path.getsize(path),
+                'sha256': digest.hexdigest(),
+            })
+    payload = {
+        'schema_version': 1,
+        'source_model': os.path.abspath(model_path),
+        'instrumented_conv_inputs': added_outputs,
+        'file_count': len(files),
+        'files': files,
+    }
+    inventory_path = os.path.join(root, 'generate_bin_inventory.json')
+    with open(inventory_path, 'w', encoding='utf-8') as stream:
+        json.dump(payload, stream, indent=2, ensure_ascii=False)
+
 if __name__ == "__main__":
     from concurrent.futures import ThreadPoolExecutor, as_completed
     from get_conv_name import load_onnx_operators
@@ -959,18 +1092,21 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     model_path = args.model_path
-    folder_path = args.folder_path
+    final_folder = os.path.abspath(args.folder_path.rstrip(os.sep))
+    if os.path.isdir(final_folder) and os.listdir(final_folder):
+        raise GenerateBinTensorContractError(
+            f"refusing to overwrite non-empty output directory: {final_folder}"
+        )
+    staging_folder = f"{final_folder}.partial.{os.getpid()}"
+    os.makedirs(staging_folder, exist_ok=False)
+    folder_path = staging_folder
     preprocess_mode = normalize_preprocess_mode(args.preprocess_mode)
     if folder_path[-1] != '/':
         folder_path = folder_path + '/'
-    results, names, intput_data = run_inference(model_path, preprocess_mode=preprocess_mode)
+    results, names, intput_data, shared_model, added_outputs = run_inference(
+        model_path, preprocess_mode=preprocess_mode
+    )
     operators = load_onnx_operators(model_path)
-
-    # 主线程只加载一次模型，传入各 worker 复用，避免多线程并发读同一文件导致 initializer 数据不完整
-    try:
-        shared_model = onnx.load(model_path, load_external_data=True)
-    except Exception:
-        shared_model = onnx.load(model_path)
 
     max_workers = min(8, NUM_LAYERS)
     failed_layers = []
@@ -993,3 +1129,7 @@ if __name__ == "__main__":
         detail = "; ".join(f"L{idx}: {err}" for idx, err in sorted(failed_layers))
         print(f"generate_bin 失败: {len(failed_layers)} 层出错 — {detail}", file=sys.stderr)
         sys.exit(1)
+    _write_export_inventory(staging_folder, model_path, added_outputs)
+    if os.path.isdir(final_folder):
+        os.rmdir(final_folder)
+    os.replace(staging_folder, final_folder)

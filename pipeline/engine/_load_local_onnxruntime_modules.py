@@ -37,6 +37,8 @@ def load_local_onnxruntime_modules(patches_dir: str | Path | None = None) -> Non
         sys.path.remove(patches_str)
         was_in_path = True
 
+    local_quant_utils = None
+    local_conv = None
     try:
         import onnxruntime as system_ort  # noqa: WPS433
         from onnxruntime.quantization import operators as system_operators  # noqa: WPS433
@@ -61,6 +63,7 @@ def load_local_onnxruntime_modules(patches_dir: str | Path | None = None) -> Non
                 mod = importlib.util.module_from_spec(spec)
                 sys.modules["onnxruntime.quantization.quant_utils"] = mod
                 spec.loader.exec_module(mod)
+                local_quant_utils = mod
                 if quant_pkg is not None:
                     setattr(quant_pkg, "quant_utils", mod)
                 print(f"✓ 已加载本地 quant_utils.py: {quant_utils_path}")
@@ -81,6 +84,7 @@ def load_local_onnxruntime_modules(patches_dir: str | Path | None = None) -> Non
                 mod = importlib.util.module_from_spec(spec)
                 sys.modules["onnxruntime.quantization.operators.conv"] = mod
                 spec.loader.exec_module(mod)
+                local_conv = mod
                 if ops_pkg is not None:
                     setattr(ops_pkg, "conv", mod)
                 if quant_pkg is not None and hasattr(quant_pkg, "operators"):
@@ -91,6 +95,23 @@ def load_local_onnxruntime_modules(patches_dir: str | Path | None = None) -> Non
                 print(f"⚠ 无法加载: {conv_path}")
         else:
             print(f"⚠ 缺少补丁文件: {conv_path}")
+
+        # The public quantization package builds this registry and binds helper
+        # functions before the local modules above are loaded. Replacing
+        # sys.modules alone therefore leaves stale system implementations live.
+        if local_conv is not None:
+            from onnxruntime.quantization import registry  # noqa: WPS433
+
+            registry.QDQRegistry["Conv"] = local_conv.QDQConv
+            registry.QDQRegistry["ConvTranspose"] = local_conv.QDQConv
+            print("✓ QDQ Conv registry 已绑定本地 weight-only 实现")
+
+        if local_quant_utils is not None:
+            from onnxruntime.quantization import qdq_quantizer  # noqa: WPS433
+
+            compute_params = qdq_quantizer.compute_data_quant_params
+            compute_params.__globals__["compute_scale_zp"] = local_quant_utils.compute_scale_zp
+            print("✓ QDQ small-scale 计算已绑定本地实现")
     except Exception as e:  # noqa: BLE001
         warnings.warn(f"加载本地 onnxruntime 补丁失败: {e}", UserWarning)
     finally:
