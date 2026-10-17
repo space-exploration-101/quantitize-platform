@@ -70,7 +70,7 @@ def step_quantize(cfg: JobConfig, manifest: dict) -> None:
 
 
 def step_onnx_eval(cfg: JobConfig, manifest: dict, *, input_mode: str = "direct") -> None:
-    step_key = "onnx_eval" if input_mode == "direct" else "fpga_eval"
+    step_key = "onnx_eval" if input_mode == "direct" else "fpga_input_roundtrip_eval"
     set_step_status(manifest, step_key, "running")
     script = platform_script(PlatformScripts.ONNX_EVAL)
     args = [
@@ -111,7 +111,7 @@ def step_generate_bin(cfg: JobConfig, manifest: dict) -> None:
     model = cfg.output_onnx()
     r = run_script(
         script,
-        [str(model), str(cfg.layer_bin_dir())],
+        [str(model), str(cfg.layer_bin_dir()), "--preprocess-mode", cfg.preprocess_mode],
         log_path=_log(cfg, "generate_bin"),
     )
     if r.returncode != 0:
@@ -131,7 +131,7 @@ def step_merge_bin(cfg: JobConfig, manifest: dict) -> None:
     renamed.mkdir(parents=True, exist_ok=True)
 
     steps = [
-        (EngineScripts.RENAME_WT, [str(source), str(renamed)]),
+        (EngineScripts.RENAME_WT, [str(source), str(renamed), str(cfg.output_onnx())]),
         (EngineScripts.MERGE_WT, [str(renamed), str(output)]),
         (EngineScripts.RENAME_BN, [str(source), str(renamed)]),
         (EngineScripts.MERGE_BN, [str(renamed), str(output)]),
@@ -189,7 +189,7 @@ def run_full_pipeline(cfg: JobConfig) -> None:
         ("quantize", lambda: step_quantize(cfg, manifest)),
         ("onnx_eval", lambda: step_onnx_eval(cfg, manifest, input_mode="direct")),
         ("fpga_test_pack", lambda: step_fpga_test_pack(cfg, manifest)),
-        ("fpga_eval", lambda: step_onnx_eval(cfg, manifest, input_mode="fpga_side_view")),
+        ("fpga_input_roundtrip_eval", lambda: step_onnx_eval(cfg, manifest, input_mode="fpga_side_view")),
         ("generate_bin", lambda: step_generate_bin(cfg, manifest)),
         ("merge_bin", lambda: step_merge_bin(cfg, manifest)),
         ("bundle", lambda: step_bundle(cfg, manifest)),

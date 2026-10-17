@@ -70,7 +70,7 @@ input/
   test/images|labels/    # 测试集
 workspace/               # 量化 onnx、bin、all_bin
 fpga_test_pack/          # FPGA 侧视测包
-results/                 # pt_eval / onnx_eval / fpga_eval
+results/                 # pt_eval / onnx_eval / fpga_input_roundtrip_eval
 logs/<step>.log          # 全量 runner 写入
 manifest.json            # 八步状态
 *_quantized_bundle.zip   # 最终交付包
@@ -127,7 +127,7 @@ cd /home/rs/wrs/onnxviewe/quantitize-platform
 | 2 | `quantize` | `engine/quantitize.py` | engine |
 | 3 | `onnx_eval` | `02_onnx_eval.py`（`direct`） | runner |
 | 4 | `fpga_test_pack` | `04_generate_fpga_test_pack.py` | runner |
-| 5 | `fpga_eval` | `02_onnx_eval.py`（`fpga_side_view`） | runner |
+| 5 | `fpga_input_roundtrip_eval` | `02_onnx_eval.py`（`fpga_side_view`） | runner |
 | 6 | `generate_bin` | `engine/check_certain_layer_multi.py` | engine |
 | 7 | `merge_bin` | `01_rename_wt` → `02_merge_wt` → `03_rename_bn` → `04_merge_bn` | engine |
 | 8 | `bundle` | `06_bundle.py` | runner |
@@ -138,7 +138,7 @@ validate?
     → quantitize.py
     → onnx_eval (direct)
     → fpga_test_pack
-    → onnx_eval (fpga_side_view)   # manifest: fpga_eval
+    → onnx_eval (fpga_side_view)   # manifest: fpga_input_roundtrip_eval
     → check_certain_layer_multi
     → rename/merge WT + BN
     → bundle
@@ -241,7 +241,7 @@ $PY pipeline/runner/04_generate_fpga_test_pack.py --job-dir "$JOB"
 
 **预期：** `$JOB/fpga_test_pack/`（由 test 图转换的侧视测包）。
 
-#### 第 5 步 — `fpga_eval`（侧视）
+#### 第 5 步 — `fpga_input_roundtrip_eval`（输入回环）
 
 ```bash
 $PY pipeline/runner/02_onnx_eval.py \
@@ -251,7 +251,7 @@ $PY pipeline/runner/02_onnx_eval.py \
   --batch-size 8
 ```
 
-**预期：** `$JOB/results/fpga_eval/`。
+**预期：** `$JOB/results/fpga_input_roundtrip_eval/`。这是 ONNX 软件输入回环，不代表 FPGA 实机计算验收。API 兼容读取历史 `fpga_eval` 目录，恢复旧 manifest 时将旧阶段状态迁移到新名称；页面使用 API 返回的目录名加载样例图。
 
 #### 第 6 步 — `generate_bin`
 
@@ -259,7 +259,7 @@ $PY pipeline/runner/02_onnx_eval.py \
 mkdir -p "$JOB/workspace/bin"
 $PY pipeline/engine/check_certain_layer_multi.py \
   "$JOB/workspace/aituosh_moon_0727_2_output.onnx" \
-  "$JOB/workspace/bin"
+  "$JOB/workspace/bin" --preprocess-mode passthrough
 ```
 
 **预期：** `$JOB/workspace/bin/` 下大量层 `*_wt.bin` / `*_bn.bin`。
@@ -272,7 +272,7 @@ OUT_ALL="$JOB/workspace/all_bin"
 RENAMED="$JOB/workspace/renamed_weights_bin"
 mkdir -p "$OUT_ALL" "$RENAMED"
 
-$PY pipeline/engine/01_rename_wt_files.py "$SRC_BIN" "$RENAMED"
+$PY pipeline/engine/01_rename_wt_files.py "$SRC_BIN" "$RENAMED" "$JOB/workspace/aituosh_moon_0727_2_output.onnx"
 $PY pipeline/engine/02_merge_wt_files.py  "$RENAMED" "$OUT_ALL"
 # runner 要求存在 ALL_WT.bin（若只有 ALL_wt.bin 会改名）
 $PY pipeline/engine/03_rename_bn_files.py "$SRC_BIN" "$RENAMED"
@@ -280,6 +280,10 @@ $PY pipeline/engine/04_merge_bn.py        "$RENAMED" "$OUT_ALL"
 ```
 
 **预期：** `$JOB/workspace/all_bin/ALL_WT.bin`，以及合并后的 BN 产物（如 `ALL_BN.bin`，以脚本实际输出为准）。
+
+权重重命名步骤需要 ONNX 路径，以便 `L43_bin_process.py` 从图结构提取解码系数并生成 `T32_T32_L43_WT.bin`。预处理模式必须与任务配置一致，上例仅演示 `passthrough`，不能在其他模式任务中硬编码使用。
+
+单图逐层 tensor 导出为独立工具，不自动进入八阶段任务或交付 ZIP；使用方法及 T32 布局见 [逐层导出说明](../docs/reference/LAYER_TRACE_EXPORT.md)。
 
 #### 第 8 步 — `bundle`
 

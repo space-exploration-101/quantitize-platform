@@ -33,7 +33,7 @@
 </section>
 
 <table>
-  <tr><th>指标</th><th>PT</th><th>ONNX</th><th>FPGA 侧视</th></tr>
+  <tr><th>指标</th><th>PT</th><th>ONNX</th><th>FPGA 输入回环</th></tr>
   {% macro cell(s) %}{% if s is not none %}{{ '%.4f'|format(s) }}{% else %}—{% endif %}{% endmacro %}
   <tr><td>Precision</td><td>{{ cell(pt.precision if pt else none) }}</td><td>{{ cell(onnx.precision if onnx else none) }}</td><td>{{ cell(fpga.precision if fpga else none) }}</td></tr>
   <tr><td>Recall</td><td>{{ cell(pt.recall if pt else none) }}</td><td>{{ cell(onnx.recall if onnx else none) }}</td><td>{{ cell(fpga.recall if fpga else none) }}</td></tr>
@@ -120,7 +120,7 @@
 <div class="eval-columns">
   {{ eval_column('PT 评测', 'pt_eval', pt_errors) }}
   {{ eval_column('ONNX 评测', 'onnx_eval', onnx_errors) }}
-  {{ eval_column('FPGA 侧视', 'fpga_eval', fpga_errors) }}
+  {{ eval_column('FPGA 输入回环', fpga_eval_name, fpga_errors) }}
 </div>
 
 <p><a href="/tasks/{{ cfg.job_id }}">返回监控</a></p>

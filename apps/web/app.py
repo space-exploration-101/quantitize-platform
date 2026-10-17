@@ -478,6 +478,7 @@ async def metrics_page(request: Request, task_id: str):
             "pt_errors": data.get("pt_errors") or empty_groups,
             "onnx_errors": data.get("onnx_errors") or empty_groups,
             "fpga_errors": data.get("fpga_errors") or empty_groups,
+            "fpga_eval_name": data.get("fpga_eval_name") or "fpga_eval",
             "preprocess_mode_label": data.get("preprocess_mode") or "",
             "eval_data": data.get("eval_data") or {},
             "busy": False,

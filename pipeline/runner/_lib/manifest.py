@@ -15,7 +15,7 @@ PIPELINE_STEPS: List[str] = [
     "quantize",
     "onnx_eval",
     "fpga_test_pack",
-    "fpga_eval",
+    "fpga_input_roundtrip_eval",
     "generate_bin",
     "merge_bin",
     "bundle",
@@ -28,7 +28,11 @@ def _now_iso() -> str:
 
 def load_manifest(path: Path) -> Dict[str, Any]:
     if path.is_file():
-        return json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
+        steps = data.get("steps") or {}
+        if "fpga_eval" in steps and "fpga_input_roundtrip_eval" not in steps:
+            steps["fpga_input_roundtrip_eval"] = steps.pop("fpga_eval")
+        return data
     return {
         "steps": {name: {"status": "pending"} for name in PIPELINE_STEPS},
         "updated_at": _now_iso(),

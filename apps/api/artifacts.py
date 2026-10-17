@@ -22,7 +22,7 @@ from constants import IMAGE_EXTS  # noqa: E402
 from job_config import JobConfig  # noqa: E402
 from shared_datasets import load_registry  # noqa: E402
 
-EVAL_NAMES = ("pt_eval", "onnx_eval", "fpga_eval")
+EVAL_NAMES = ("pt_eval", "onnx_eval", "fpga_input_roundtrip_eval", "fpga_eval")
 CASE_SUBDIRS = ("error_cases", "success_cases")
 _SAFE_FILENAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$")
 _IMAGE_MIME = {
@@ -155,17 +155,24 @@ def metrics_payload(cfg: JobConfig) -> dict[str, Any]:
     def load_summary(name: str) -> Optional[dict]:
         return _load_json(cfg.results_dir / name / "summary.json")
 
+    roundtrip_name = "fpga_input_roundtrip_eval"
+    roundtrip_summary = load_summary(roundtrip_name)
+    if roundtrip_summary is None:
+        roundtrip_name = "fpga_eval"
+        roundtrip_summary = load_summary(roundtrip_name)
+
     return {
         "task_id": cfg.job_id,
         "display_name": cfg.display_name,
         "preprocess_mode": cfg.preprocess_mode,
         "pt": load_summary("pt_eval"),
         "onnx": load_summary("onnx_eval"),
-        "fpga": load_summary("fpga_eval"),
+        "fpga": roundtrip_summary,
+        "fpga_eval_name": roundtrip_name,
         "pt_success": _load_overlay_cases(cfg, "pt_eval", "success"),
         "pt_errors": _load_error_groups(cfg, "pt_eval"),
         "onnx_errors": _load_error_groups(cfg, "onnx_eval"),
-        "fpga_errors": _load_error_groups(cfg, "fpga_eval"),
+        "fpga_errors": _load_error_groups(cfg, roundtrip_name),
         "eval_data": eval_dataset_desc(cfg),
     }
 
