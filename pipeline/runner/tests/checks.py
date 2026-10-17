@@ -158,7 +158,7 @@ def run_all_checks(cfg: JobConfig, *, skip_quantize_heavy: bool = False) -> Dict
         check_quantize(cfg, checks)
     check_eval_summary(cfg.onnx_eval_dir() / "summary.json", checks, "3_onnx_eval")
     check_fpga_pack(cfg, checks)
-    check_eval_summary(cfg.fpga_eval_dir() / "summary.json", checks, "5_fpga_eval")
+    check_eval_summary(cfg.fpga_input_roundtrip_eval_dir() / "summary.json", checks, "5_fpga_input_roundtrip_eval")
     check_generate_bin(cfg, checks)
     check_merge_bin(cfg, checks)
     check_bundle(cfg, checks)
